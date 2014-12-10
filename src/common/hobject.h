@@ -35,7 +35,9 @@ struct hobject_t {
   uint32_t hash;
 private:
   bool max;
-  static const int64_t POOL_IS_TEMP = -1;
+  static const int64_t POOL_META = -1;
+  static const int64_t POOL_TEMP_START = -2; // and then negative
+  friend class spg_t;  // for POOL_TEMP_START
 public:
   int64_t pool;
   string nspace;
@@ -57,12 +59,11 @@ public:
     return match_hash(hash, bits, match);
   }
 
-  static hobject_t make_temp(const string &name) {
-    hobject_t ret(object_t(name), "", CEPH_NOSNAP, 0, POOL_IS_TEMP, "");
-    return ret;
-  }
   bool is_temp() const {
-    return pool == POOL_IS_TEMP;
+    return pool < POOL_TEMP_START;
+  }
+  bool is_meta() const {
+    return pool == POOL_META;
   }
   
   hobject_t() : snap(0), hash(0), max(false), pool(-1) {}
