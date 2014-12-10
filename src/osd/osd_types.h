@@ -476,10 +476,6 @@ public:
     : str(pg_and_snap_to_str(pgid, snap))
   { }
 
-  static coll_t make_temp_coll(spg_t pgid) {
-    return coll_t(pg_to_tmp_str(pgid));
-  }
-
   static coll_t make_removal_coll(uint64_t seq, spg_t pgid) {
     return coll_t(seq_to_removal_str(seq, pgid));
   }

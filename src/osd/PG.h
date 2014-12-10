@@ -1197,7 +1197,6 @@ public:
   virtual void _scrub(ScrubMap &map) { }
   virtual void _scrub_clear_state() { }
   virtual void _scrub_finish() { }
-  virtual void get_colls(list<coll_t> *out) = 0;
   virtual void split_colls(
     spg_t child,
     int split_bits,
