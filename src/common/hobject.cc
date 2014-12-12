@@ -198,7 +198,7 @@ ostream& operator<<(ostream& out, const hobject_t& o)
 // version 5.
 void ghobject_t::encode(bufferlist& bl) const
 {
-  ENCODE_START(5, 3, bl);
+  ENCODE_START(6, 3, bl);
   ::encode(hobj.key, bl);
   ::encode(hobj.oid, bl);
   ::encode(hobj.snap, bl);
@@ -208,12 +208,13 @@ void ghobject_t::encode(bufferlist& bl) const
   ::encode(hobj.pool, bl);
   ::encode(generation, bl);
   ::encode(shard_id, bl);
+  ::encode(max, bl);
   ENCODE_FINISH(bl);
 }
 
 void ghobject_t::decode(bufferlist::iterator& bl)
 {
-  DECODE_START_LEGACY_COMPAT_LEN(5, 3, 3, bl);
+  DECODE_START_LEGACY_COMPAT_LEN(6, 3, 3, bl);
   if (struct_v >= 1)
     ::decode(hobj.key, bl);
   ::decode(hobj.oid, bl);
@@ -234,6 +235,11 @@ void ghobject_t::decode(bufferlist::iterator& bl)
     generation = ghobject_t::NO_GEN;
     shard_id = shard_id_t::NO_SHARD;
   }
+  if (struct_v >= 6) {
+    ::decode(max, bl);
+  } else {
+    max = false;
+  }
   DECODE_FINISH(bl);
 }
 
@@ -248,6 +254,8 @@ void ghobject_t::decode(json_spirit::Value& v)
       generation = p.value_.get_uint64();
     else if (p.name_ == "shard_id")
       shard_id.id = p.value_.get_int();
+    else if (p.name_ == "max")
+      max = p.value_.get_int();
   }
 }
 
@@ -258,6 +266,7 @@ void ghobject_t::dump(Formatter *f) const
     f->dump_int("generation", generation);
   if (shard_id != shard_id_t::NO_SHARD)
     f->dump_int("shard_id", shard_id);
+  f->dump_int("max", (int)max);
 }
 
 void ghobject_t::generate_test_instances(list<ghobject_t*>& o)
@@ -287,6 +296,8 @@ void ghobject_t::generate_test_instances(list<ghobject_t*>& o)
 
 ostream& operator<<(ostream& out, const ghobject_t& o)
 {
+  if (o.is_max())
+    return out << "GHMAX";
   out << o.hobj;
   if (o.generation != ghobject_t::NO_GEN ||
       o.shard_id != shard_id_t::NO_SHARD) {
