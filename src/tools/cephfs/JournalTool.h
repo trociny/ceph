@@ -55,6 +55,7 @@ class JournalTool : public MDSUtility
     librados::IoCtx io;
 
     // Metadata backing store manipulation
+    int scavenge_dentries(EMetaBlob const &metablob, bool const dry_run);
     int replay_offline(EMetaBlob const &metablob, bool const dry_run);
 
     // Splicing

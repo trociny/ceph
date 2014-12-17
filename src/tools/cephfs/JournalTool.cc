@@ -48,7 +48,7 @@ void JournalTool::usage()
     << "      --type=<UPDATE|OPEN|SESSION...><\n"
     << "      --frag=<ino>.<frag> [--dname=<dentry string>]\n"
     << "      --client=<session id integer>\n"
-    << "    <effect>: [get|apply|splice]\n"
+    << "    <effect>: [get|apply|recover_dentries|splice]\n"
     << "    <output>: [summary|binary|json] [--path <path>]\n"
     << "\n"
     << "Options:\n"
@@ -263,7 +263,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
   std::vector<const char*>::iterator arg = argv.begin();
 
   std::string command = *(arg++);
-  if (command != "get" && command != "apply" && command != "splice") {
+  if (command != "get" && command != "apply" && command != "splice" && command != "recover_dentries") {
     derr << "Unknown argument '" << command << "'" << dendl;
     usage();
     return -EINVAL;
@@ -335,6 +335,25 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       EMetaBlob const *mb = le->get_metablob();
       if (mb) {
         replay_offline(*mb, dry_run);
+      }
+    }
+  } else if (command == "recover_dentries") {
+    r = js.scan();
+    if (r) {
+      derr << "Failed to scan journal (" << cpp_strerror(r) << ")" << dendl;
+      return r;
+    }
+
+    bool dry_run = false;
+    if (arg != argv.end() && ceph_argparse_flag(argv, arg, "--dry_run", (char*)NULL)) {
+      dry_run = true;
+    }
+
+    for (JournalScanner::EventMap::iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      LogEvent *le = i->second.log_event;
+      EMetaBlob const *mb = le->get_metablob();
+      if (mb) {
+        scavenge_dentries(*mb, dry_run);
       }
     }
   } else if (command == "splice") {
@@ -491,6 +510,176 @@ int JournalTool::journal_reset()
   return r;
 }
 
+#define fdout(v) dout(v) << __func__ << ": "
+#define fderr derr << __func__ << ": "
+
+/**
+ * Selective offline replay which only reads out dentries and writes
+ * them to the backing store iff their version is > what is currently
+ * in the backing store.
+ *
+ * In order to write dentries to the backing store, we may create the
+ * required enclosing dirfrag objects.
+ *
+ * Test this by running scavenge on an unflushed journal, then nuking
+ * it offline, then starting an MDS and seeing that the dentries are
+ * visible.
+ */
+int JournalTool::scavenge_dentries(EMetaBlob const &metablob, bool const dry_run)
+{
+  int r = 0;
+
+  // Replay fullbits (dentry+inode)
+  for (list<dirfrag_t>::const_iterator lp = metablob.lump_order.begin();
+       lp != metablob.lump_order.end(); ++lp)
+  {
+    dirfrag_t const &frag = *lp;
+    EMetaBlob::dirlump const &lump = metablob.lump_map.find(frag)->second;
+    lump._decode_bits();
+    object_t frag_oid = InodeStore::get_object_name(frag.ino, frag.frag, "");
+
+    dout(4) << __func__ << ": inspecting lump " << frag_oid.name << dendl;
+
+    // Check for presence of dirfrag object
+    uint64_t psize;
+    time_t pmtime;
+    r = io.stat(frag_oid.name, &psize, &pmtime);
+    if (r == -ENOENT) {
+      fdout(4) << ": Frag object " << frag_oid.name << " did not exist, will create" << dendl;
+    } else if (r != 0) {
+      derr << "Unexpected error stat'ing frag " << frag_oid.name
+           << ": " << cpp_strerror(r) << dendl;
+      return r;
+    } else {
+      fdout(4) << "Frag object " << frag_oid.name << " exists, will modify" << dendl;
+    }
+
+    // Update fnode in omap header of dirfrag object
+    bool write_fnode = false;
+    bufferlist old_fnode_bl;
+    r = io.omap_get_header(frag_oid.name, &old_fnode_bl);
+    if (r == -ENOENT) {
+      // Creating dirfrag from scratch
+      dout(4) << __func__ << ": failed to read OMAP header from directory fragment "
+        << frag_oid.name << " " << cpp_strerror(r) << dendl;
+      write_fnode = true;
+    } else if (r == 0) {
+      // Conditionally update existing omap header
+      fnode_t old_fnode;
+      bufferlist::iterator old_fnode_iter = old_fnode_bl.begin();
+      old_fnode.decode(old_fnode_iter);  // FIXME handle decode error and overwrite
+      dout(4) << __func__ << ": frag " << frag_oid.name << " fnode old v" <<
+        old_fnode.version << " vs new v" << lump.fnode.version << dendl;
+      write_fnode = old_fnode.version < lump.fnode.version;
+    } else {
+      // Unexpected error
+      dout(4) << __func__ << ": failed to read OMAP header from directory fragment "
+        << frag_oid.name << " " << cpp_strerror(r) << dendl;
+      return r;
+    }
+
+    if (write_fnode && !dry_run) {
+      dout(4) << __func__ << ": writing fnode to omap header" << dendl;
+      bufferlist fnode_bl;
+      lump.fnode.encode(fnode_bl);
+      r = io.omap_set_header(frag_oid.name, fnode_bl);
+      if (r != 0) {
+        derr << "Failed to write fnode for frag object " << frag_oid.name << dendl;
+        return r;
+      }
+    }
+
+    // Try to get the existing dentry
+    list<ceph::shared_ptr<EMetaBlob::fullbit> > const &fb_list = lump.get_dfull();
+    for (list<ceph::shared_ptr<EMetaBlob::fullbit> >::const_iterator fbi = fb_list.begin(); fbi != fb_list.end(); ++fbi) {
+      EMetaBlob::fullbit const &fb = *(*fbi);
+
+      // Get a key like "foobar_head"
+      std::string key;
+      dentry_key_t dn_key(fb.dnlast, fb.dn.c_str());
+      dn_key.encode(key);
+
+      // See if the dentry is present
+      std::set<std::string> keys;
+      keys.insert(key);
+      std::map<std::string, bufferlist> vals;
+      r = io.omap_get_vals_by_keys(frag_oid.name, keys, &vals);
+      if (r != 0) {
+        derr << __func__ << ": unexpected error reading fragment object "
+             << frag_oid.name << ": " << cpp_strerror(r) << dendl;
+        return r;
+      }
+    
+      dout(4) << __func__ << ": inspecting fullbit " << frag_oid.name << "/" << fb.dn << dendl;
+      bool write_dentry = false;
+      if (vals.find(key) == vals.end()) {
+        dout(4) << __func__ << ": dentry did not already exist, will create" << dendl;
+        write_dentry = true;
+      } else {
+        dout(4) << "dentry " << key << " existed already" << dendl;
+        assert(vals.size() == 1);
+        dout(4) << __func__ << ": dentry exists, checking versions..." << dendl;
+        bufferlist &old_dentry = vals[key];
+        // Decode dentry+inode
+        bufferlist::iterator q = old_dentry.begin();
+
+        snapid_t dnfirst;
+        ::decode(dnfirst, q);
+        char dentry_type;
+        ::decode(dentry_type, q);
+
+        if (dentry_type == 'L') {
+          // leave write_dentry false, we have no version to
+          // compare with in a hardlink, so it's not safe to
+          // squash over it with what's in this fullbit
+          dout(4) << __func__ << ": skipping hardlink dentry in backing store" << dendl;
+        } else if (dentry_type == 'I') {
+          // Read out inode version to compare with backing store
+          InodeStore inode;
+          inode.decode_bare(q);
+          dout(4) << __func__ << ": decoded embedded inode version "
+            << inode.inode.version << " vs fullbit version "
+            << fb.inode.version << dendl;
+          if (inode.inode.version < fb.inode.version) {
+            write_dentry = true;
+          }
+        } else {
+          dout(4) << __func__ << ": corrupt dentry in backing store, overwriting from journal" << dendl;
+          write_dentry = true;
+        }
+      }
+
+      // XXX inodes and dentries both have versions
+      // what's the difference?
+      if (write_dentry && !dry_run) {
+        dout(4) << __func__ << ": writing dentry " << key << " into frag " << frag_oid.name << dendl;
+        bufferlist dentry_bl;
+        ::encode(fb.dnfirst, dentry_bl);
+        ::encode('I', dentry_bl);
+
+        InodeStore inode;
+        inode.inode = fb.inode;
+        inode.xattrs = fb.xattrs;
+        inode.dirfragtree = fb.dirfragtree;
+        inode.snap_blob = fb.snapbl;
+        inode.symlink = fb.symlink;
+        inode.old_inodes = fb.old_inodes;
+        inode.encode_bare(dentry_bl);
+
+        vals[key] = dentry_bl;
+        r = io.omap_set(frag_oid.name, vals);
+        if (r != 0) {
+          dout(0) << __func__ << ": error writing dentry " << key
+                  << " into object " << frag_oid.name << dendl;
+          return r;
+        }
+      }
+    }
+  }
+
+  return r;
+}
+
 
 int JournalTool::replay_offline(EMetaBlob const &metablob, bool const dry_run)
 {
@@ -628,6 +817,7 @@ int JournalTool::replay_offline(EMetaBlob const &metablob, bool const dry_run)
       }
     }
 
+    // Replay nullbits: removal of dentries
     list<EMetaBlob::nullbit> const &nb_list = lump.get_dnull();
     for (list<EMetaBlob::nullbit>::const_iterator
 	iter = nb_list.begin(); iter != nb_list.end(); ++iter) {
