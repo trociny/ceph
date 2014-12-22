@@ -4595,16 +4595,13 @@ int FileStore::collection_list_partial(coll_t c, ghobject_t start,
     if (c.is_temp(pgid)) {
       pool = -2 - pgid.pool();
       shard = pgid.shard;
-      derr << "foo" << dendl;
     } else if (c.is_pg(pgid, snap)) {
       pool = pgid.pool();
       shard = pgid.shard;
-      derr << " default on " << c << dendl;
     } else if (c.is_meta()) {
       pool = -1;
     } else {
       pool = 0;       // hrm, user is test code!
-      derr << " default on " << c << dendl;
     }
     dout(20) << __func__ << " pool is " << pool << dendl;
   }
