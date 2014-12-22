@@ -1077,8 +1077,8 @@ TEST_P(StoreTest, Synthetic) {
       test_obj.unlink();
     } else if (val > 55) {
       test_obj.write();
-    } else if (val > 50) {
-      test_obj.clone();
+      //} else if (val > 50) {
+      //test_obj.clone();
     } else if (val > 10) {
       test_obj.read();
     } else {
@@ -1115,8 +1115,8 @@ TEST_P(StoreTest, AttrSynthetic) {
       test_obj.rmattr();
     } else if (val > 47) {
       test_obj.setattrs();
-    } else if (val > 45) {
-      test_obj.clone();
+      //} else if (val > 45) {
+      //test_obj.clone();
     } else if (val > 30) {
       test_obj.getattrs();
     } else {
