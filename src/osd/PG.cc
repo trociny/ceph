@@ -52,7 +52,7 @@
 #undef dout_prefix
 #define dout_prefix _prefix(_dout, this)
 
-static coll_t META_COLL("meta");
+static coll_t META_COLL;
 
 template <class T>
 static ostream& _prefix(std::ostream *_dout, T *t)
