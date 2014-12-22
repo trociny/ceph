@@ -250,7 +250,7 @@ TEST_P(StoreTest, SimpleObjectTest) {
 
 TEST_P(StoreTest, SimpleListTest) {
   int r;
-  coll_t cid = coll_t();
+  coll_t cid(spg_t(pg_t(0, 1), shard_id_t(1)));
   {
     ObjectStore::Transaction t;
     t.create_collection(cid);
@@ -264,7 +264,8 @@ TEST_P(StoreTest, SimpleListTest) {
     for (int i=0; i<200; ++i) {
       string name("object_");
       name += stringify(i);
-      ghobject_t hoid(hobject_t(sobject_t(name, CEPH_NOSNAP)));
+      ghobject_t hoid(hobject_t(sobject_t(name, CEPH_NOSNAP)),
+		      ghobject_t::NO_GEN, shard_id_t(1));
       all.insert(hoid);
       t.touch(cid, hoid);
       cerr << "Creating object " << hoid << std::endl;
