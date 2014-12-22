@@ -4585,16 +4585,20 @@ int FileStore::collection_list_partial(coll_t c, ghobject_t start,
   if (start.is_max())
     return 0;
 
-  // figure out the pool id.
+  // figure out the pool id.  we need this in order to generate a
+  // meaningful 'next' value.
   int64_t pool = -1;
+  shard_id_t shard;
   {
     spg_t pgid;
     snapid_t snap;
     if (c.is_temp(pgid)) {
       pool = -2 - pgid.pool();
+      shard = pgid.shard;
       derr << "foo" << dendl;
     } else if (c.is_pg(pgid, snap)) {
       pool = pgid.pool();
+      shard = pgid.shard;
       derr << " default on " << c << dendl;
     } else if (c.is_meta()) {
       pool = -1;
@@ -4612,9 +4616,11 @@ int FileStore::collection_list_partial(coll_t c, ghobject_t start,
       return r;
     if (*next != ghobject_t::get_max())
       return r;
-    dout(10) << __func__ << " fall through to non-temp collection" << dendl;
     start = ghobject_t();
     start.hobj.pool = pool;
+    start.set_shard(shard);
+    dout(10) << __func__ << " fall through to non-temp collection, start "
+	     << start << dendl;
   }
 
   Index index;
@@ -4636,9 +4642,11 @@ int FileStore::collection_list_partial(coll_t c, ghobject_t start,
     dout(20) << "objects: " << *ls << dendl;
 
   // HashIndex doesn't know the pool when constructing a 'next' value
-  if (!next->is_max())
+  if (!next->is_max()) {
     next->hobj.pool = pool;
-  dout(10) << "  next " << *next << dendl;
+    next->set_shard(shard);
+  }
+  dout(20) << "  next " << *next << dendl;
 
   tracepoint(objectstore, collection_list_partial_exit, 0);
   return 0;
