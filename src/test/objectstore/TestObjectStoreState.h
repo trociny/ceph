@@ -33,7 +33,7 @@ public:
     int m_next_object_id;
 
     coll_entry_t(int i, char *coll_buf, char *meta_obj_buf)
-    : m_id(i), m_coll(coll_buf),
+      : m_id(i), m_coll(coll_t::make_string_coll(coll_buf)),
       m_meta_obj(sobject_t(object_t(meta_obj_buf), CEPH_NOSNAP)),
       m_osr(coll_buf), m_next_object_id(0) {
     }

@@ -245,7 +245,7 @@ bool DBObjectMap::parse_ghobject_key_v0(const string &in, coll_t *c,
     snap = strtoull(snap_str.c_str(), NULL, 16);
   sscanf(hash_str.c_str(), "%X", &hash);
 
-  *c = coll_t(coll);
+  *c = coll_t::make_string_coll(coll);
   int64_t pool = -1;
   spg_t pg;
   if (c->is_pg_prefix(pg))

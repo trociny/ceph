@@ -463,14 +463,16 @@ ostream& operator<<(ostream& out, const spg_t &pg);
 // ----------------------
 
 class coll_t {
+  explicit coll_t(const std::string &str_)
+    : str(str_)
+  { }
+
 public:
   coll_t()
     : str("meta")
   { }
 
-  explicit coll_t(const std::string &str_)
-    : str(str_)
-  { }
+  coll_t(const coll_t& other) : str(other.str) {}
 
   explicit coll_t(spg_t pgid, snapid_t snap = CEPH_NOSNAP)
     : str(pg_and_snap_to_str(pgid, snap))
@@ -478,6 +480,10 @@ public:
 
   static coll_t make_removal_coll(uint64_t seq, spg_t pgid) {
     return coll_t(seq_to_removal_str(seq, pgid));
+  }
+
+  static coll_t make_string_coll(const std::string& s) {
+    return coll_t(s);
   }
 
   const std::string& to_str() const {
