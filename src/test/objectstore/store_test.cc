@@ -266,6 +266,7 @@ TEST_P(StoreTest, SimpleListTest) {
       name += stringify(i);
       ghobject_t hoid(hobject_t(sobject_t(name, CEPH_NOSNAP)),
 		      ghobject_t::NO_GEN, shard_id_t(1));
+      hoid.hobj.pool = 1;
       all.insert(hoid);
       t.touch(cid, hoid);
       cerr << "Creating object " << hoid << std::endl;
