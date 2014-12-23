@@ -4600,24 +4600,33 @@ int FileStore::collection_list_partial(coll_t c, ghobject_t start,
       shard = pgid.shard;
     } else if (c.is_meta()) {
       pool = -1;
+      shard = shard_id_t::NO_SHARD;
     } else {
       pool = 0;       // hrm, user is test code!
+      shard = shard_id_t::NO_SHARD;
     }
-    dout(20) << __func__ << " pool is " << pool << dendl;
+    dout(20) << __func__ << " pool is " << pool << " shard is " << shard
+	     << " pgid " << pgid << dendl;
   }
 
-  if (!c.is_temp() && !c.is_meta() && start.hobj.pool < -1) {
-    coll_t temp = c.get_temp();
-    int r = collection_list_partial(temp, start, min, max, seq, ls, next);
-    if (r < 0)
-      return r;
-    if (*next != ghobject_t::get_max())
-      return r;
-    start = ghobject_t();
-    start.hobj.pool = pool;
-    start.set_shard(shard);
-    dout(10) << __func__ << " fall through to non-temp collection, start "
-	     << start << dendl;
+  ghobject_t sep;
+  sep.hobj.pool = -1;
+  sep.set_shard(shard);
+  if (!c.is_temp() && !c.is_meta()) {
+    if (start < sep) {
+      dout(10) << __func__ << " first checking temp pool" << dendl;
+      coll_t temp = c.get_temp();
+      int r = collection_list_partial(temp, start, min, max, seq, ls, next);
+      if (r < 0)
+	return r;
+      if (*next != ghobject_t::get_max())
+	return r;
+      start = sep;
+      dout(10) << __func__ << " fall through to non-temp collection, start "
+	       << start << dendl;
+    } else {
+      dout(10) << __func__ << " start " << start << " >= sep " << sep << dendl;
+    }
   }
 
   Index index;
