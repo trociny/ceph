@@ -203,9 +203,23 @@ void OSDMonitor::update_from_paxos(bool *need_bootstrap)
     assert(inc_bl.length());
 
     dout(7) << "update_from_paxos  applying incremental " << osdmap.epoch+1 << dendl;
+    dout(30) << "prior osdmap:\n";
+    Formatter *f = new_formatter("json-pretty");
+    osdmap.dump(f);
+    f->flush(*_dout);
+    delete f;
+    *_dout << dendl;
+
     OSDMap::Incremental inc(inc_bl);
     err = osdmap.apply_incremental(inc);
     assert(err == 0);
+
+    dout(30) << "post osdmap:\n";
+    Formatter *f = new_formatter("json-pretty");
+    osdmap.dump(f);
+    f->flush(*_dout);
+    delete f;
+    *_dout << dendl;
 
     if (!t)
       t.reset(new MonitorDBStore::Transaction);
