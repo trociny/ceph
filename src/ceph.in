@@ -423,6 +423,8 @@ def new_style_command(parsed_args, cmdargs, target, sigdict, inbuf, verbose):
                     return 0, '', ''
                 cmdargs = parse_cmdargs(interactive_input.split())[2]
                 target = find_cmd_target(cmdargs)
+                if target == False:
+                    return -errno.EINVAL, '', 'invalid target'
                 valid_dict = validate_command(sigdict, cmdargs, verbose)
                 if valid_dict:
                     if parsed_args.output_format:
@@ -751,6 +753,10 @@ def main():
         childargs.insert(0, 'status')
 
     target = find_cmd_target(childargs)
+
+    if target == False:
+        print >> sys.stderr, 'Can\'t find target: invalid arguments'
+        return 1
 
     # Repulsive hack to handle tell: lop off 'tell' and target
     # and validate the rest of the command.  'target' is already

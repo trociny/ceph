@@ -357,11 +357,10 @@ class CephName(CephArgtype):
             if not t in ('osd', 'mon', 'client', 'mds'):
                 raise ArgumentValid('unknown type ' + t)
             if t == 'osd':
-                if i != '*':
-                    try:
-                        i = int(i)
-                    except:
-                        raise ArgumentFormat('osd id ' + i + ' not integer')
+                try:
+                    i = int(i)
+                except:
+                    pass
             self.nametype = t
         self.val = s
         self.nameid = i
@@ -1014,7 +1013,7 @@ def find_cmd_target(childargs):
         if len(valid_dict) == 2:
             return 'pg', valid_dict['pgid']
 
-    return 'mon', ''
+    return False
 
 def send_command(cluster, target=('mon', ''), cmd=None, inbuf='', timeout=0,
                  verbose=False):
