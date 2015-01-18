@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 usage() {
     cat <<EOF
@@ -62,6 +62,24 @@ if [ $rocksdb -eq 1 ]; then
     CONFIGURE_FLAGS="$CONFIGURE_FLAGS --with-librocksdb-static"
 fi
 
+FREEBSD_CONFIGURE_FLAGS=
+if [ "$(uname)" = FreeBSD ]; then
+    CC=clang
+    CXX=clang++
+    #CC=gcc48
+    #CXX=g++48
+    CFLAGS="${CFLAGS} -I/usr/local/include"
+    LDFLAGS="${LDFLAGS} -L/usr/local/lib -export-dynamic"
+    FREEBSD_CONFIGURE_FLAGS="
+      --without-fuse
+      --without-tcmalloc
+      --without-libaio
+      --without-libxfs
+      --without-lttng
+      --without-radosgw"
+#      --with-gnu-ld
+fi
+
 if [ $profile -eq 1 ]; then
     if [ $debug_level -ne 0 ]; then
        echo "Can't specify both -d and -P. Profiling builds are \
@@ -106,7 +124,6 @@ if [ -n "${encode_dump}" ]; then
     CXXFLAGS="${CXXFLAGS} -DENCODE_DUMP=${encode_dump}"
 fi
 
-
 # Warning about unused parameters just leads to a lot of pointless spew when
 # using C++. It doesn't interact well with class inheritance.
 CFLAGS="${CFLAGS} -Wno-unused-parameter"
@@ -115,16 +132,22 @@ CXXFLAGS="${CXXFLAGS} ${CFLAGS}"
 
 if [ "${verbose}" -ge 1 ]; then
     echo "CFLAGS=${CFLAGS}"
-    echo "CXXFLAGS=${CFLAGS}"
+    echo "CXXFLAGS=${CXXFLAGS}"
+    echo "LDFLAGS=${LDFLAGS}"
+    echo "CC=${CC}"
+    echo "CXX=${CXX}"
 fi
 
 export CFLAGS
 export CXXFLAGS
+export LDFLAGS
+export CC
+export CXX
 
 ./autogen.sh || die "autogen failed"
 
 ./configure \
 --prefix=/usr --sbindir=/sbin --localstatedir=/var --sysconfdir=/etc \
 --with-debug $with_profiler --with-nss --without-cryptopp --with-radosgw \
-$CONFIGURE_FLAGS \
+$CONFIGURE_FLAGS $FREEBSD_CONFIGURE_FLAGS \
 || die "configure failed"
