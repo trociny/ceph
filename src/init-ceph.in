@@ -12,6 +12,7 @@
 # Description:       Enable Ceph distributed file system services.
 ### END INIT INFO
 
+test -f /lib/lsb/init-functions &&
 . /lib/lsb/init-functions
 
 # detect systemd, also check whether the systemd-run binary exists
