@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/sh -e
 #
 # Ceph distributed storage system
 #
@@ -18,6 +18,39 @@ if test $(id -u) != 0 ; then
     SUDO=sudo
 fi
 export LC_ALL=C # the following is vulnerable to i18n
+
+if [ "$(uname)" = FreeBSD ]; then
+    $SUDO pkg install \
+        automake \
+        bash \
+        boost-all \
+        cryptopp \
+        curl \
+        cython \
+        e2fsprogs-libuuid \
+        expat \
+        fuse \
+        git \
+        gmake \
+        google-perftools \
+        junit \
+        leveldb \
+        libatomic_ops \
+        libedit \
+        libtool \
+        libxml2 \
+        nss \
+        pkgconf \
+        py27-Flask \
+        py27-argparse \
+        py27-nose \
+        python27 \
+        snappy \
+        yasm \
+#        gcc \
+
+    exit $?
+fi
 
 if test -f /etc/redhat-release ; then
     $SUDO yum install -y redhat-lsb-core
