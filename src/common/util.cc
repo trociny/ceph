@@ -24,6 +24,7 @@
 #ifdef HAVE_SYS_VFS_H
 #include <sys/vfs.h>
 #endif
+#include <sys/mount.h>
 
 #if defined(DARWIN) || defined(__FreeBSD__)
 #include <sys/param.h>
