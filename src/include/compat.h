@@ -13,8 +13,12 @@
 #define CEPH_COMPAT_H
 
 #if defined(__FreeBSD__)
+#include <fcntl.h>
+
 #define	ENODATA	61
 #define	MSG_MORE 0
+#define	O_DSYNC O_SYNC
+#define O_LARGEFILE 0
 #endif /* !__FreeBSD__ */
 
 #ifndef TEMP_FAILURE_RETRY
