@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#include "include/compat.h"
 #include "include/types.h"
 #include "include/utime.h"
 #include "objclass/objclass.h"

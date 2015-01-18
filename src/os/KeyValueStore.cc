@@ -15,6 +15,7 @@
  */
 
 #include "include/int_types.h"
+#include "include/compat.h"
 
 #include <unistd.h>
 #include <stdlib.h>
@@ -28,8 +29,6 @@
 
 #include <iostream>
 #include <map>
-
-#include "include/compat.h"
 
 #include <fstream>
 #include <sstream>

@@ -14,6 +14,7 @@
 
 #include <boost/lexical_cast.hpp>
 #include "include/assert.h"  // lexical_cast includes system assert.h
+#include "include/compat.h"
 
 #include <boost/config/warning_disable.hpp>
 #include <boost/spirit/include/qi.hpp>
@@ -55,7 +56,6 @@
 #include "common/errno.h"
 #include "common/Timer.h"
 #include "common/perf_counters.h"
-#include "include/compat.h"
 #include "osd/OSDMap.h"
 
 #include <errno.h>

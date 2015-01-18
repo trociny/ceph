@@ -8,6 +8,7 @@
 #include <errno.h>
 
 #include "include/types.h"
+#include "include/compat.h"
 #include "include/utime.h"
 #include "objclass/objclass.h"
 #include "cls/version/cls_version_types.h"

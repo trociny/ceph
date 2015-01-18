@@ -1,5 +1,6 @@
 #include <errno.h>
 
+#include "include/compat.h"
 #include "include/types.h"
 #include "cls/log/cls_log_ops.h"
 #include "include/rados/librados.hpp"

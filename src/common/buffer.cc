@@ -14,6 +14,7 @@
 
 
 #include "armor.h"
+#include "include/compat.h"
 #include "common/environment.h"
 #include "common/errno.h"
 #include "common/safe_io.h"
@@ -23,7 +24,6 @@
 #include "include/atomic.h"
 #include "common/Mutex.h"
 #include "include/types.h"
-#include "include/compat.h"
 #if defined(HAVE_XIO)
 #include "msg/xio/XioMsg.h"
 #endif

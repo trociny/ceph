@@ -4,6 +4,7 @@
 #include "chain_xattr.h"
 
 #include "include/int_types.h"
+#include "include/compat.h"
 
 #include <unistd.h>
 #include <stdlib.h>

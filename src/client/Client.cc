@@ -13,6 +13,8 @@
  */
 
 
+#include "include/compat.h"
+
 // unix-ey fs stuff
 #include <unistd.h>
 #include <sys/types.h>
@@ -74,8 +76,6 @@ using namespace std;
 #define dout_subsys ceph_subsys_client
 
 #include "include/lru.h"
-
-#include "include/compat.h"
 
 #include "Client.h"
 #include "Inode.h"

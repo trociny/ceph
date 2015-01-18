@@ -22,6 +22,7 @@
 #endif
 
 #include "include/types.h"
+#include "include/compat.h"
 #include "include/stringify.h"
 #include "include/unordered_map.h"
 #include "include/memory.h"

@@ -17,6 +17,7 @@
 #include <sstream>
 #include <vector>
 
+#include "include/compat.h"
 #include "include/types.h"
 #include "include/utime.h"
 #include "objclass/objclass.h"

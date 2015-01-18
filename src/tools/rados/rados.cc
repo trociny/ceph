@@ -12,6 +12,7 @@
  *
  */
 
+#include "include/compat.h"
 #include "include/types.h"
 
 #include "include/rados/librados.hpp"
@@ -42,7 +43,6 @@ using namespace librados;
 #include <locale>
 
 #include "cls/lock/cls_lock_client.h"
-#include "include/compat.h"
 #include "common/hobject.h"
 
 int rados_tool_sync(const std::map < std::string, std::string > &opts,

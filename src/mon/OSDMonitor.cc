@@ -16,6 +16,8 @@
  * 
  */
 
+#include "include/compat.h"
+
 #include <sstream>
 
 #include "OSDMonitor.h"
@@ -53,7 +55,6 @@
 
 #include "erasure-code/ErasureCodePlugin.h"
 
-#include "include/compat.h"
 #include "include/assert.h"
 #include "include/stringify.h"
 #include "include/util.h"

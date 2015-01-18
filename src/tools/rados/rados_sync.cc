@@ -11,6 +11,7 @@
  * Foundation.  See file COPYING.
  *
  */
+#include "include/compat.h"
 #include "include/int_types.h"
 
 #include "common/ceph_argparse.h"
@@ -21,7 +22,6 @@
 #include "global/global_init.h"
 #include "include/rados/librados.hpp"
 #include "rados_sync.h"
-#include "include/compat.h"
 
 #include "common/xattr.h"
 

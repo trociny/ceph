@@ -21,6 +21,8 @@
 #include "OSD.h"
 #include "OpRequest.h"
 
+#include "include/compat.h"
+
 #include "common/errno.h"
 #include "common/perf_counters.h"
 
@@ -50,7 +52,6 @@
 #include "mds/inode_backtrace.h" // Ugh
 
 #include "common/config.h"
-#include "include/compat.h"
 #include "common/cmdparse.h"
 
 #include "mon/MonClient.h"

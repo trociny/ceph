@@ -11,6 +11,7 @@
  * Foundation.  See file COPYING.
  *
  */
+#include "include/compat.h"
 #include "include/int_types.h"
 
 #include "rados_sync.h"
@@ -30,7 +31,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "include/compat.h"
 #include "common/xattr.h"
 
 using namespace librados;

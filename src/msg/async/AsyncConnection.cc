@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "include/compat.h"
 #include "include/Context.h"
 #include "common/errno.h"
 #include "AsyncMessenger.h"
