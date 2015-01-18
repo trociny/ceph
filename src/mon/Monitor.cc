@@ -2870,17 +2870,27 @@ void Monitor::handle_command(MMonCommand *m)
       r = -EINVAL;
     }
   } else if (prefix == "version") {
-    if (f) {
-      f->open_object_section("version");
-      f->dump_string("version", pretty_version_to_str());
-      f->close_section();
-      f->flush(ds);
+    if (session->proxy_con) {
+      // It looks the command is forwarded from an older mon that does not
+      // recognize "version" command. As it is very likely the client is
+      // expecting to see the version of the initial mon, better return an
+      // error here.
+      rs = "too old";
+      r = -ENOTSUP;
     } else {
-      ds << pretty_version_to_str();
+      if (f) {
+        dout(0) << "dump" << dendl;
+        f->open_object_section("version");
+        f->dump_string("version", pretty_version_to_str());
+        f->close_section();
+        f->flush(ds);
+      } else {
+	ds << pretty_version_to_str();
+      }
+      rdata.append(ds);
+      rs = "";
+      r = 0;
     }
-    rdata.append(ds);
-    rs = "";
-    r = 0;
   }
 
  out:
