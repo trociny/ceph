@@ -1955,7 +1955,7 @@ update:
     msg->quota = i->quota;
     mds->send_message_client_counted(msg, session->connection);
   }
-  for (map<const mds_rank_t, unsigned>::iterator it = in->replicas_begin();
+  for (map<mds_rank_t, unsigned>::iterator it = in->replicas_begin();
        it != in->replicas_end(); ++it) {
     MGatherCaps *msg = new MGatherCaps;
     msg->ino = in->ino();
