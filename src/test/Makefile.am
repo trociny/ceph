@@ -1095,7 +1095,6 @@ ceph_test_c_headers_CFLAGS = $(AM_CFLAGS) \
 	-Wformat-y2k \
 	-Winit-self \
 	-Wignored-qualifiers \
-	-Wold-style-declaration \
 	-Wold-style-definition \
 	-Wtype-limits
 bin_DEBUGPROGRAMS += ceph_test_c_headers
