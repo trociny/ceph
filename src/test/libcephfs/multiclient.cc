@@ -20,7 +20,11 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#if defined(__FreeBSD__)
+#include <sys/extattr.h>
+#else
 #include <sys/xattr.h>
+#endif
 
 TEST(LibCephFS, MulticlientSimple) {
   struct ceph_mount_info *ca, *cb;

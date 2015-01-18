@@ -21,6 +21,7 @@
 #ifdef HAVE_SYS_VFS_H
 #include <sys/vfs.h>
 #endif
+#include <sys/mount.h>
 
 // test if an entire buf is zero in 8-byte chunks
 bool buf_is_zero(const char *buf, size_t len)

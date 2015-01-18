@@ -20,7 +20,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#if defined(__FreeBSD__)
+#include <sys/extattr.h>
+#define XATTR_CREATE	1 // XXX
+#else
 #include <sys/xattr.h>
+#endif
 
 #ifdef __linux__
 #include <limits.h>

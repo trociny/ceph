@@ -15,8 +15,11 @@
 #include "Ser.hpp"
 #include <arpa/inet.h>
 #include <cstdlib>
+#if defined(__FreeBSD__)
+#include <sys/endian.h>
+#else
 #include <endian.h>
-
+#endif
 
 rbd_replay::Ser::Ser(std::ostream &out)
   : m_out(out) {

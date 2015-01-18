@@ -15,8 +15,11 @@
 #include "Deser.hpp"
 #include <arpa/inet.h>
 #include <cstdlib>
+#if defined(__FreeBSD__)
+#include <sys/endian.h>
+#else
 #include <endian.h>
-
+#endif
 
 rbd_replay::Deser::Deser(std::istream &in)
   : m_in(in) {

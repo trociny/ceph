@@ -4,6 +4,7 @@
 #include "include/rados/librados.hpp"
 #include "include/radosstriper/libradosstriper.h"
 #include "include/radosstriper/libradosstriper.hpp"
+#include "include/int_types.h"
 #include "include/ceph_fs.h"
 #include "test/librados/test.h"
 #include "test/libradosstriper/TestCase.h"
