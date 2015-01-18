@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#define _XOPEN_SOURCE 600
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -40,8 +41,8 @@ static int run_command(const char *command)
 
 	if (status < 0) {
 		char error_buf[80];
-		fprintf(stderr, "couldn't run '%s': %s\n", command,
-			strerror_r(errno, error_buf, sizeof(error_buf)));
+		strerror_r(errno, error_buf, sizeof(error_buf));
+		fprintf(stderr, "couldn't run '%s': %s\n", command, error_buf);
 	} else if (WIFSIGNALED(status)) {
 		fprintf(stderr, "'%s' killed by signal %d\n", command,
 			WTERMSIG(status));
