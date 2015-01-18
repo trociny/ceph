@@ -18,7 +18,7 @@
 #include <unistd.h>
 
 #ifndef __CYGWIN__
-# ifndef DARWIN
+#if !defined(__FreeBSD__) && !defined(DARWIN)
 #  include <sys/ioctl.h>
 #  include <syscall.h>
 #  include "../os/btrfs_ioctl.h"
