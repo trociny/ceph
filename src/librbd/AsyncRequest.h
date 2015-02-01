@@ -18,15 +18,7 @@ public:
   AsyncRequest(ImageCtx &image_ctx, Context *on_finish);
   virtual ~AsyncRequest();
 
-  void complete(int r) {
-    if (m_canceled) {
-      m_on_finish->complete(-ERESTART);
-      delete this;
-    } else if (should_complete(r)) {
-      m_on_finish->complete(r);
-      delete this;
-    }
-  }
+  void complete(int r);
 
   virtual void send() = 0;
 

@@ -16,6 +16,7 @@
 #include <fcntl.h>
 
 #define	ENODATA	61
+#define	ERESTART 85
 #define	MSG_MORE 0
 #define	O_DSYNC O_SYNC
 #define O_LARGEFILE 0

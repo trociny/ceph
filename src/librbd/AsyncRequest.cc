@@ -1,5 +1,6 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
+#include "include/compat.h"
 #include "librbd/AsyncRequest.h"
 #include "librbd/ImageCtx.h"
 #include "librbd/internal.h"
@@ -19,6 +20,16 @@ AsyncRequest::~AsyncRequest() {
   Mutex::Locker l(m_image_ctx.async_ops_lock);
   assert(m_xlist_item.remove_myself());
   m_image_ctx.async_requests_cond.Signal();
+}
+
+void AsyncRequest::complete(int r) {
+  if (m_canceled) {
+    m_on_finish->complete(-ERESTART);
+    delete this;
+  } else if (should_complete(r)) {
+    m_on_finish->complete(r);
+    delete this;
+  }
 }
 
 librados::AioCompletion *AsyncRequest::create_callback_completion() {
