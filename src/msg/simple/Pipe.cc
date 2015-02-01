@@ -850,6 +850,7 @@ void Pipe::set_socket_options()
   }
 #endif
 
+#if defined(IPTOS_CLASS_CS6) && defined(SO_PRIORITY)
   int prio = msgr->get_socket_priority();
   if (prio >= 0) {
     int r;
@@ -870,6 +871,7 @@ void Pipe::set_socket_options()
                          << ": " << cpp_strerror(errno) << dendl;
     }
   }
+#endif
 }
 
 int Pipe::connect()
