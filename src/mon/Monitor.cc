@@ -106,7 +106,6 @@ MonCommand classic_mon_commands[] = {
 #include <mon/DumplingMonCommands.h>
 };
 
-
 long parse_pos_long(const char *s, ostream *pss)
 {
   if (*s == '-' || *s == '+') {
@@ -2588,16 +2587,39 @@ void Monitor::handle_command(MMonCommand *m)
     reply_command(m, -EINVAL, "command not known", 0);
     return;
   }
-  // validate command is in our map & matches, or forward
+  // validate command is in our map & matches, or forward if it is allowed
   const MonCommand *mon_cmd = _get_moncommand(prefix, mon_commands,
                                               ARRAY_SIZE(mon_commands));
-  if (!is_leader() && (!mon_cmd ||
-      (*leader_cmd != *mon_cmd))) {
-    dout(10) << "We don't match leader, forwarding request " << m << dendl;
-    forward_request_leader(m);
+  if (!is_leader()) {
+    if (!mon_cmd) {
+      if (leader_cmd->is_tell()) {
+	reply_command(m, -EINVAL,
+		      "command not locally supported and not allowed to forward",
+		      0);
+	return;
+      }
+      dout(10) << "Command not locally supported, forwarding request " << m << dendl;
+      forward_request_leader(m);
+      return;
+    } else if (*leader_cmd != *mon_cmd) {
+      if (mon_cmd->is_tell()) {
+	reply_command(m, -EINVAL,
+		      "command does not match leader and not allowed to forward",
+		      0);
+	return;
+      }
+      dout(10) << "We don't match leader, forwarding request " << m << dendl;
+      forward_request_leader(m);
+      return;
+    }
+  }
+
+  if (session->proxy_con && mon_cmd->is_tell()) {
+    dout(10) << "Got forward for tell command " << m << dendl;
+    reply_command(m, -EINVAL, "forward for tell command", rdata, 0);
     return;
   }
-  
+
   /* what we perceive as being the service the command falls under */
   string service(mon_cmd->module);
 
@@ -4644,4 +4666,17 @@ bool Monitor::ms_verify_authorizer(Connection *con, int peer_type,
     isvalid = true;
   }
   return true;
+}
+
+bool MonCommand::is_tell() const {
+  // XXX: this can be optimized: instead of parsing availability on
+  // every is_tell() call, parse it once on the command creation and
+  // cache the result in a bool variable.
+  std::set<std::string> s;
+  get_str_set(std::string(availability), ",", s);
+  for (std::set<std::string>::iterator i = s.begin(); i != s.end(); i++) {
+    if (*i == "tell")
+      return true;
+  }
+  return false;
 }

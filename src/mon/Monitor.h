@@ -984,6 +984,8 @@ struct MonCommand {
   bool requires_perm(char p) const {
     return (req_perms.find(p) != string::npos); 
   }
+
+  bool is_tell() const;
 };
 WRITE_CLASS_ENCODER(MonCommand)
 
