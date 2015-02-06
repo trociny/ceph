@@ -2852,17 +2852,6 @@ void Objecter::_throttle_op(Op *op, int op_budget)
   }
 }
 
-void Objecter::unregister_op(Op *op)
-{
-  op->session->lock.get_write();
-  op->session->ops.erase(op->tid);
-  op->session->lock.unlock();
-  put_session(op->session);
-  op->session = NULL;
-
-  inflight_ops.dec();
-}
-
 /* This function DOES put the passed message before returning */
 void Objecter::handle_osd_op_reply(MOSDOpReply *m)
 {
