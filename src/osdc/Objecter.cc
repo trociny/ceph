@@ -2144,18 +2144,13 @@ ceph_tid_t Objecter::_op_submit(Op *op, RWLock::Context& lc)
     _maybe_request_map();
   }
 
-  MOSDOp *m = NULL;
-  if (need_send) {
-    m = _prepare_osd_op(op);
-  }
-
   s->lock.get_write();
   if (op->tid == 0)
     op->tid = last_tid.inc();
   _session_op_assign(s, op);
 
   if (need_send) {
-    _send_op(op, m);
+    _send_op(op);
   }
 
   // Last chance to touch Op here, after giving up session lock it can be
