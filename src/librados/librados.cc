@@ -1826,6 +1826,11 @@ librados::config_t librados::IoCtx::cct()
   return (config_t)io_ctx_impl->client->cct;
 }
 
+void librados::IoCtx::add_global_op_flags(int flags)
+{
+  io_ctx_impl->client->add_global_op_flags(flags);
+}
+
 librados::IoCtx::IoCtx(IoCtxImpl *io_ctx_impl_)
   : io_ctx_impl(io_ctx_impl_)
 {

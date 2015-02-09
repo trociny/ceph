@@ -88,6 +88,7 @@ void usage(ostream& out)
 "\n"
 "   listsnaps <obj-name>             list the snapshots of this object\n"
 "   bench <seconds> write|seq|rand [-t concurrent_operations] [--no-cleanup] [--run-name run_name]\n"
+"                                  [--parallel-reads]\n"
 "                                    default is 16 concurrent IOs and 4 MB ops\n"
 "                                    default is to clean up after write benchmark\n"
 "                                    default run-name is 'benchmark_last_metadata'\n"
@@ -871,8 +872,12 @@ protected:
   }
 
 public:
-  RadosBencher(CephContext *cct_, librados::Rados& _r, librados::IoCtx& _i)
-    : ObjBencher(cct_), completions(NULL), rados(_r), io_ctx(_i), iterator_valid(false) {}
+  RadosBencher(CephContext *cct_, librados::Rados& _r, librados::IoCtx& _i,
+	       bool parallel_reads = false)
+    : ObjBencher(cct_), completions(NULL), rados(_r), io_ctx(_i), iterator_valid(false) {
+    if (parallel_reads)
+      io_ctx.add_global_op_flags(CEPH_OSD_FLAG_PARALLEL_READS);
+  }
   ~RadosBencher() { }
 };
 
@@ -1138,6 +1143,7 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   int concurrent_ios = 16;
   unsigned op_size = default_op_size;
   bool cleanup = true;
+  bool parallel_reads = false;
   const char *snapname = NULL;
   snap_t snapid = CEPH_NOSNAP;
   std::map<std::string, std::string>::const_iterator i;
@@ -1286,6 +1292,10 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   i = opts.find("no-cleanup");
   if (i != opts.end()) {
     cleanup = false;
+  }
+  i = opts.find("parallel-reads");
+  if (i != opts.end()) {
+    parallel_reads = true;
   }
   i = opts.find("pretty-format");
   if (i != opts.end()) {
@@ -2254,7 +2264,7 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
       operation = OP_RAND_READ;
     else
       usage_exit();
-    RadosBencher bencher(g_ceph_context, rados, io_ctx);
+    RadosBencher bencher(g_ceph_context, rados, io_ctx, parallel_reads);
     bencher.set_show_time(show_time);
     ret = bencher.aio_bench(operation, seconds, num_objs,
 			    concurrent_ios, op_size, cleanup, run_name);
@@ -2634,6 +2644,8 @@ int main(int argc, const char **argv)
       opts["show-time"] = "true";
     } else if (ceph_argparse_flag(args, i, "--no-cleanup", (char*)NULL)) {
       opts["no-cleanup"] = "true";
+    } else if (ceph_argparse_flag(args, i, "--parallel-reads", (char*)NULL)) {
+      opts["parallel-reads"] = "true";
     } else if (ceph_argparse_witharg(args, i, &val, "--run-name", (char*)NULL)) {
       opts["run-name"] = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--prefix", (char*)NULL)) {

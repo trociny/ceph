@@ -128,6 +128,8 @@ public:
   void get();
   bool put();
   void blacklist_self(bool set);
+
+  void add_global_op_flags(int flags);
 };
 
 #endif

@@ -840,3 +840,8 @@ void librados::RadosClient::handle_log(MLog *m)
 
   m->put();
 }
+
+void librados::RadosClient::add_global_op_flags(int flags)
+{
+  objecter->add_global_op_flags(flags);
+}

@@ -1032,6 +1032,8 @@ namespace librados
 
     config_t cct();
 
+    void add_global_op_flags(int flags);
+
   private:
     /* You can only get IoCtx instances from Rados */
     IoCtx(IoCtxImpl *io_ctx_impl_);
