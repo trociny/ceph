@@ -930,7 +930,7 @@ void Objecter::_scan_requests(OSDSession *s,
 	break;
       // -- fall-thru --
     case RECALC_OP_TARGET_NEED_RESEND:
-      if (op->session) {
+      if (op->session == s) {
 	_session_op_remove(op->session, op);
       }
       need_resend[op->tid] = op;
@@ -2151,6 +2151,23 @@ ceph_tid_t Objecter::_op_submit(Op *op, RWLock::Context& lc)
 
   if (need_send) {
     _send_op(op);
+    if ((op->target.flags & CEPH_OSD_FLAG_PARALLEL_READS) != 0) {
+      ldout(cct, 10) << "submitting read to multiple replicas in parallel" << dendl;
+      for (vector<int>::iterator i = op->target.acting.begin();
+	   i != op->target.acting.end();
+	   i++) {
+	if (*i == op->target.osd)
+	  continue;
+	OSDSession *sp = NULL;
+	if (_get_session(*i, &sp, lc) != 0)
+	  continue;
+	sp->lock.get_write();
+	sp->ops[op->tid] = op;
+	_send_op(op, NULL, sp);
+	sp->lock.unlock();
+	put_session(sp);
+      }
+    }
   }
 
   // Last chance to touch Op here, after giving up session lock it can be
@@ -2777,39 +2794,45 @@ MOSDOp *Objecter::_prepare_osd_op(Op *op)
   return m;
 }
 
-void Objecter::_send_op(Op *op, MOSDOp *m)
+void Objecter::_send_op(Op *op, MOSDOp *m, OSDSession *session)
 {
   assert(rwlock.is_locked());
-  assert(op->session->lock.is_locked());
+
+  if (session == NULL)
+    session = op->session;
+
+  assert(session->lock.is_locked());
 
   if (!m) {
     assert(op->tid > 0);
     m = _prepare_osd_op(op);
   }
 
-  ldout(cct, 15) << "_send_op " << op->tid << " to osd." << op->session->osd << dendl;
+  ldout(cct, 15) << "_send_op " << op->tid << " to osd." << session->osd << dendl;
 
-  ConnectionRef con = op->session->con;
-  assert(con);
+  if (session == op->session) { // XXXMG
+    ConnectionRef con = session->con;
+    assert(con);
 
-  // preallocated rx buffer?
-  if (op->con) {
-    ldout(cct, 20) << " revoking rx buffer for " << op->tid << " on " << op->con << dendl;
-    op->con->revoke_rx_buffer(op->tid);
+    // preallocated rx buffer?
+    if (op->con) {
+      ldout(cct, 20) << " revoking rx buffer for " << op->tid << " on " << op->con << dendl;
+      op->con->revoke_rx_buffer(op->tid);
+    }
+    if (op->outbl &&
+	op->ontimeout == NULL &&  // only post rx_buffer if no timeout; see #9582
+	op->outbl->length()) {
+      ldout(cct, 20) << " posting rx buffer for " << op->tid << " on " << con << dendl;
+      op->con = con;
+      op->con->post_rx_buffer(op->tid, *op->outbl);
+    }
+
+    op->incarnation = session->incarnation;
   }
-  if (op->outbl &&
-      op->ontimeout == NULL &&  // only post rx_buffer if no timeout; see #9582
-      op->outbl->length()) {
-    ldout(cct, 20) << " posting rx buffer for " << op->tid << " on " << con << dendl;
-    op->con = con;
-    op->con->post_rx_buffer(op->tid, *op->outbl);
-  }
-
-  op->incarnation = op->session->incarnation;
 
   m->set_tid(op->tid);
 
-  op->session->con->send_message(m);
+  session->con->send_message(m);
 }
 
 int Objecter::calc_op_budget(Op *op)
@@ -2908,7 +2931,7 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
       ldout(cct, 7) << " ignoring reply from attempt " << m->get_retry_attempt()
 		    << " from " << m->get_source_inst()
 		    << "; last attempt " << (op->attempts - 1) << " sent to "
-		    << op->session->con->get_peer_addr() << dendl;
+		    << s->con->get_peer_addr() << dendl;
       m->put();
       s->lock.unlock();
       put_session(s);
@@ -2947,17 +2970,46 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
   }
 
   if (rc == -EAGAIN) {
-    ldout(cct, 7) << " got -EAGAIN, resubmitting" << dendl;
+    if ((op->target.flags & CEPH_OSD_FLAG_PARALLEL_READS) != 0 && s != op->session) {
+      ldout(cct, 7) << " got -EAGAIN for parrallel reads from non-master session, ignoring" << dendl;
+    } else {
+      ldout(cct, 7) << " got -EAGAIN, resubmitting" << dendl;
 
-    // new tid
-    s->ops.erase(op->tid);
-    op->tid = last_tid.inc();
+      // new tid
+      s->ops.erase(op->tid);
+      op->tid = last_tid.inc();
 
-    _send_op(op);
+      _send_op(op);
+    }
     s->lock.unlock();
     put_session(s);
     m->put();
     return;
+  }
+
+  if ((op->target.flags & CEPH_OSD_FLAG_PARALLEL_READS) != 0) {
+    ldout(cct, 10) << "cleaning op from all sessions" << dendl;
+    if (op->session != s) {
+      // Make current session master
+      OSDSession *os = op->session;
+      get_session(os);
+      os->lock.get_write();
+      op->session = s;
+      os->lock.unlock();
+      put_session(os);
+    }
+    for (map<int,OSDSession*>::iterator p = osd_sessions.begin();
+	 p != osd_sessions.end(); p++) {
+      OSDSession *ss = p->second;
+      if (ss == s)
+	continue;
+      get_session(ss);
+      ss->lock.get_write();
+      // XXXMG: will lead to stray messages.
+      ss->ops.erase(op->tid);
+      ss->lock.unlock();
+      put_session(ss);
+    }
   }
 
   l.unlock();

@@ -1285,6 +1285,8 @@ static int translate_flags(int flags)
     op_flags |= CEPH_OSD_FLAG_SKIPRWLOCKS;
   if (flags & librados::OPERATION_IGNORE_OVERLAY)
     op_flags |= CEPH_OSD_FLAG_IGNORE_OVERLAY;
+  if (flags & librados::OPERATION_PARALLEL_READS)
+    op_flags |= CEPH_OSD_FLAG_PARALLEL_READS;
 
   return op_flags;
 }
@@ -1352,6 +1354,8 @@ int librados::IoCtx::aio_operate(const std::string& oid, AioCompletion *c,
     op_flags |= CEPH_OSD_FLAG_BALANCE_READS;
   if (flags & OPERATION_LOCALIZE_READS)
     op_flags |= CEPH_OSD_FLAG_LOCALIZE_READS;
+  if (flags & OPERATION_PARALLEL_READS)
+    op_flags |= CEPH_OSD_FLAG_PARALLEL_READS;
   if (flags & OPERATION_ORDER_READS_WRITES)
     op_flags |= CEPH_OSD_FLAG_RWORDERED;
 
