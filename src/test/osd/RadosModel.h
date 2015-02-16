@@ -507,6 +507,24 @@ public:
     pool_obj_cont.rbegin()->second.erase(oid);
     pool_obj_cont.rbegin()->second.insert(pair<string,ObjectDesc>(oid, contents));
   }
+
+  void make_oid_in_use(const string& oid)
+  {
+    assert(state_lock.is_locked_by_me());
+    assert(oid_in_use.count(oid) == 0);
+
+    oid_in_use.insert(oid);
+    oid_not_in_use.erase(oid);
+  }
+
+  void make_oid_not_in_use(const string& oid)
+  {
+    assert(state_lock.is_locked_by_me());
+    assert(oid_not_in_use.count(oid) == 0);
+
+    oid_in_use.erase(oid);
+    oid_not_in_use.insert(oid);
+  }
 };
 
 void read_callback(librados::completion_t comp, void *arg);
@@ -538,8 +556,7 @@ public:
       }
       cont = ContDesc(context->seq_num, context->current_snap,
 		      context->seq_num, "");
-      context->oid_in_use.insert(oid);
-      context->oid_not_in_use.erase(oid);
+      context->make_oid_in_use(oid);
 
       if (rand() % 30) {
 	ContentsGenerator::iterator iter = context->attr_gen.get_iterator(cont);
@@ -554,8 +571,7 @@ public:
 	}
 	if (to_remove.empty()) {
 	  context->kick();
-	  context->oid_in_use.erase(oid);
-	  context->oid_not_in_use.insert(oid);
+	  context->make_oid_not_in_use(oid);
 	  done = true;
 	  return;
 	}
@@ -590,8 +606,7 @@ public:
     Mutex::Locker l(context->state_lock);
     done = true;
     context->update_object_version(oid, comp->get_version64());
-    context->oid_in_use.erase(oid);
-    context->oid_not_in_use.insert(oid);
+    context->make_oid_not_in_use(oid);
     context->kick();
   }
 
@@ -627,8 +642,7 @@ public:
       Mutex::Locker l(context->state_lock);
       cont = ContDesc(context->seq_num, context->current_snap,
 		      context->seq_num, "");
-      context->oid_in_use.insert(oid);
-      context->oid_not_in_use.erase(oid);
+      context->make_oid_in_use(oid);
     }
 
     map<string, bufferlist> omap_contents;
@@ -686,8 +700,7 @@ public:
     }
     done = true;
     context->update_object_version(oid, comp->get_version64());
-    context->oid_in_use.erase(oid);
-    context->oid_not_in_use.insert(oid);
+    context->make_oid_not_in_use(oid);
     context->kick();
   }
 
@@ -756,8 +769,7 @@ public:
     }
     context->update_object(cont_gen, oid, cont);
 
-    context->oid_in_use.insert(oid);
-    context->oid_not_in_use.erase(oid);
+    context->make_oid_in_use(oid);
 
     map<uint64_t, uint64_t> ranges;
 
@@ -885,8 +897,7 @@ public:
       }
 
       rcompletion->release();
-      context->oid_in_use.erase(oid);
-      context->oid_not_in_use.insert(oid);
+      context->make_oid_not_in_use(oid);
       context->kick();
       done = true;
     }
@@ -928,8 +939,7 @@ public:
     context->find_object(oid, &contents);
     bool present = !contents.deleted();
 
-    context->oid_in_use.insert(oid);
-    context->oid_not_in_use.erase(oid);
+    context->make_oid_in_use(oid);
     context->seq_num++;
 
     context->remove_object(oid);
@@ -944,8 +954,7 @@ public:
     }
 
     context->state_lock.Lock();
-    context->oid_in_use.erase(oid);
-    context->oid_not_in_use.insert(oid);
+    context->make_oid_not_in_use(oid);
     context->kick();
     context->state_lock.Unlock();
   }
@@ -1004,8 +1013,7 @@ public:
     done = 0;
     completion = context->rados.aio_create_completion((void *) this, &read_callback, 0);
 
-    context->oid_in_use.insert(oid);
-    context->oid_not_in_use.erase(oid);
+    context->make_oid_in_use(oid);
     assert(context->find_object(oid, &old_value, snap));
     if (old_value.deleted())
       std::cout << num << ":  expect deleted" << std::endl;
@@ -1068,8 +1076,7 @@ public:
   {
     context->state_lock.Lock();
     assert(!done);
-    context->oid_in_use.erase(oid);
-    context->oid_not_in_use.insert(oid);
+    context->make_oid_not_in_use(oid);
     assert(completion->is_complete());
     uint64_t version = completion->get_version64();
     if (int err = completion->get_return_value()) {
@@ -1334,8 +1341,7 @@ public:
       context->state_lock.Unlock();
       return;
     }
-    context->oid_in_use.insert(oid);
-    context->oid_not_in_use.erase(oid);
+    context->make_oid_in_use(oid);
 
     TestWatchContext *ctx = context->get_watch_context(oid);
     context->state_lock.Unlock();
@@ -1364,8 +1370,7 @@ public:
 
     {
       Mutex::Locker l(context->state_lock);
-      context->oid_in_use.erase(oid);
-      context->oid_not_in_use.insert(oid);
+      context->make_oid_not_in_use(oid);
     }
   }
 
@@ -1409,8 +1414,7 @@ public:
       return;
     }
 
-    context->oid_in_use.insert(oid);
-    context->oid_not_in_use.erase(oid);
+    context->make_oid_in_use(oid);
 
     roll_back_to = rand_choose(context->snaps)->first;
     in_use = context->snaps_in_use.lookup_or_create(
@@ -1449,8 +1453,7 @@ public:
     }
     done = true;
     context->update_object_version(oid, comp->get_version64());
-    context->oid_in_use.erase(oid);
-    context->oid_not_in_use.insert(oid);
+    context->make_oid_not_in_use(oid);
     in_use = ceph::shared_ptr<int>();
     context->kick();
   }
@@ -1497,10 +1500,8 @@ public:
       Mutex::Locker l(context->state_lock);
       cont = ContDesc(context->seq_num, context->current_snap,
 		      context->seq_num, "");
-      context->oid_in_use.insert(oid);
-      context->oid_not_in_use.erase(oid);
-      context->oid_in_use.insert(oid_src);
-      context->oid_not_in_use.erase(oid_src);
+      context->make_oid_in_use(oid);
+      context->make_oid_in_use(oid_src);
 
       // choose source snap
       if (0 && !(rand() % 4) && !context->snaps.empty()) {
@@ -1577,10 +1578,8 @@ public:
       }
     }
     if (++done == 2) {
-      context->oid_in_use.erase(oid);
-      context->oid_not_in_use.insert(oid);
-      context->oid_in_use.erase(oid_src);
-      context->oid_not_in_use.insert(oid_src);
+      context->make_oid_not_in_use(oid);
+      context->make_oid_not_in_use(oid_src);
       context->kick();
     }
   }
@@ -1696,8 +1695,7 @@ public:
     completion = context->rados.aio_create_completion((void *) cb_arg, NULL,
 						      &write_callback);
 
-    context->oid_in_use.insert(oid);
-    context->oid_not_in_use.erase(oid);
+    context->make_oid_in_use(oid);
     context->update_object_undirty(oid);
     context->state_lock.Unlock();
 
@@ -1712,8 +1710,7 @@ public:
     context->state_lock.Lock();
     assert(!done);
     assert(completion->is_complete());
-    context->oid_in_use.erase(oid);
-    context->oid_not_in_use.insert(oid);
+    context->make_oid_not_in_use(oid);
     context->update_object_version(oid, completion->get_version64());
     context->kick();
     done = true;
@@ -1770,8 +1767,7 @@ public:
     completion = context->rados.aio_create_completion((void *) cb_arg, NULL,
 						      &write_callback);
 
-    context->oid_in_use.insert(oid);
-    context->oid_not_in_use.erase(oid);
+    context->make_oid_in_use(oid);
     context->state_lock.Unlock();
 
     if (snap >= 0) {
@@ -1793,8 +1789,7 @@ public:
     context->state_lock.Lock();
     assert(!done);
     assert(completion->is_complete());
-    context->oid_in_use.erase(oid);
-    context->oid_not_in_use.insert(oid);
+    context->make_oid_not_in_use(oid);
 
     assert(context->find_object(oid, &old_value, snap));
 
@@ -1878,8 +1873,7 @@ public:
     completion = context->rados.aio_create_completion((void *) cb_arg, NULL,
 						      &write_callback);
     // leave object in unused list so that we race with other operations
-    //context->oid_in_use.insert(oid);
-    //context->oid_not_in_use.erase(oid);
+    //context->make_oid_in_use(oid);
     context->oid_flushing.insert(oid);
     context->oid_not_flushing.erase(oid);
     context->state_lock.Unlock();
@@ -1905,8 +1899,7 @@ public:
     context->state_lock.Lock();
     assert(!done);
     assert(completion->is_complete());
-    //context->oid_in_use.erase(oid);
-    //context->oid_not_in_use.insert(oid);
+    //context->make_oid_not_in_use(oid);
     context->oid_flushing.erase(oid);
     context->oid_not_flushing.insert(oid);
     int r = completion->get_return_value();
@@ -1977,8 +1970,7 @@ public:
     completion = context->rados.aio_create_completion((void *) cb_arg, NULL,
 						      &write_callback);
     // leave object in unused list so that we race with other operations
-    //context->oid_in_use.insert(oid);
-    //context->oid_not_in_use.erase(oid);
+    //context->make_oid_in_use(oid);
     context->state_lock.Unlock();
 
     op.cache_evict();
@@ -1997,8 +1989,7 @@ public:
     context->state_lock.Lock();
     assert(!done);
     assert(completion->is_complete());
-    //context->oid_in_use.erase(oid);
-    //context->oid_not_in_use.insert(oid);
+    //context->make_oid_not_in_use(oid);
     int r = completion->get_return_value();
     cout << num << ":  got " << cpp_strerror(r) << std::endl;
     if (r == 0) {
