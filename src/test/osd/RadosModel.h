@@ -61,7 +61,9 @@ enum TestOpType {
   TEST_OP_CACHE_FLUSH,
   TEST_OP_CACHE_TRY_FLUSH,
   TEST_OP_CACHE_EVICT,
-  TEST_OP_APPEND
+  TEST_OP_APPEND,
+  TEST_OP_BALANCE_READ,
+  TEST_OP_LOCALIZE_READ,
 };
 
 class TestWatchContext : public librados::WatchCtx2 {
@@ -963,6 +965,7 @@ public:
   string oid;
   ObjectDesc old_value;
   int snap;
+  int flags;
 
   ceph::shared_ptr<int> in_use;
 
@@ -987,6 +990,7 @@ public:
       completion(NULL),
       oid(oid),
       snap(0),
+      flags(0),
       retval(0),
       attrretval(0)
   {}
@@ -1058,7 +1062,9 @@ public:
       op.omap_get_header(&header, 0);
     }
     op.getxattrs(&xattrs, 0);
-    assert(!context->io_ctx.aio_operate(context->prefix+oid, completion, &op, 0));
+    int err = context->io_ctx.aio_operate(
+      context->prefix+oid, completion, &op, flags, NULL);
+    assert(err == 0);
     if (snap >= 0) {
       context->io_ctx.snap_set_read(0);
     }
@@ -1201,6 +1207,30 @@ public:
   string getType()
   {
     return "ReadOp";
+  }
+};
+
+class BalanceReadOp : public ReadOp {
+public:
+  BalanceReadOp(int n,
+	 RadosTestContext *context,
+	 const string &oid,
+	 TestOpStat *stat = 0)
+    : ReadOp(n, context, oid, stat)
+  {
+    flags = librados::OPERATION_BALANCE_READS;
+  }
+};
+
+class LocalizeReadOp : public ReadOp {
+public:
+  LocalizeReadOp(int n,
+	 RadosTestContext *context,
+	 const string &oid,
+	 TestOpStat *stat = 0)
+    : ReadOp(n, context, oid, stat)
+  {
+    flags = librados::OPERATION_LOCALIZE_READS;
   }
 };
 

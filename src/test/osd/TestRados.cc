@@ -208,6 +208,14 @@ private:
 	   << context.current_snap << std::endl;
       return new WriteOp(m_op, &context, oid, true, m_stats);
 
+    case TEST_OP_BALANCE_READ:
+      oid = *(rand_choose(context.oid_not_in_use));
+      return new BalanceReadOp(m_op, &context, oid, m_stats);
+
+    case TEST_OP_LOCALIZE_READ:
+      oid = *(rand_choose(context.oid_not_in_use));
+      return new LocalizeReadOp(m_op, &context, oid, m_stats);
+
     default:
       cerr << m_op << ": Invalid op type " << type << std::endl;
       assert(0);
@@ -259,6 +267,8 @@ int main(int argc, char **argv)
     { TEST_OP_CACHE_TRY_FLUSH, "cache_try_flush", true },
     { TEST_OP_CACHE_EVICT, "cache_evict", true },
     { TEST_OP_APPEND, "append", true },
+    { TEST_OP_BALANCE_READ, "balance_read", false },
+    { TEST_OP_LOCALIZE_READ, "localize_read", false },
     { TEST_OP_READ /* grr */, NULL },
   };
 
