@@ -1111,7 +1111,7 @@ public:
 	  cerr << num << ": oid " << oid << " contents " << to_check << " corrupt" << std::endl;
 	  context->errors++;
 	}
-	if (context->errors) assert(0);
+	assert(context->errors == 0);
       }
 
       // Attributes
