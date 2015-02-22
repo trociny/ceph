@@ -21,6 +21,7 @@
 
 #if defined(__linux__)
 #include <linux/fs.h>
+#define ENOATTR ENODATA
 #endif
 
 #include "common/xattr.h"
@@ -257,10 +258,10 @@ int chain_setxattr(const char *fn, const char *name, const void *val, size_t siz
     do {
       get_raw_xattr_name(name, i, raw_name, sizeof(raw_name));
       r = sys_removexattr(fn, raw_name);
-      if (r < 0 && r != -ENODATA)
+      if (r < 0 && r != -ENOATTR)
 	ret = r;
       i++;
-    } while (r != -ENODATA);
+    } while (r != -ENOATTR);
   }
   
   return ret;
@@ -292,10 +293,10 @@ int chain_fsetxattr(int fd, const char *name, const void *val, size_t size)
     do {
       get_raw_xattr_name(name, i, raw_name, sizeof(raw_name));
       r = sys_fremovexattr(fd, raw_name);
-      if (r < 0 && r != -ENODATA)
+      if (r < 0 && r != -ENOATTR)
 	ret = r;
       i++;
-    } while (r != -ENODATA);
+    } while (r != -ENOATTR);
   }
   
   return ret;
