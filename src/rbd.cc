@@ -18,7 +18,9 @@
 #include "common/strtol.h"
 #include "global/global_init.h"
 #include "common/safe_io.h"
+#if defined(__linux__)
 #include "include/krbd.h"
+#endif
 #include "include/stringify.h"
 #include "include/rados/librados.hpp"
 #include "include/rbd/librbd.hpp"
@@ -2286,6 +2288,7 @@ static int do_show_status(librados::IoCtx &io_ctx, librbd::Image &image,
 static int do_kernel_map(const char *poolname, const char *imgname,
 			 const char *snapname)
 {
+#if defined(__linux__)
   struct krbd_ctx *krbd;
   ostringstream oss;
   char *devnode;
@@ -2319,10 +2322,14 @@ static int do_kernel_map(const char *poolname, const char *imgname,
 out:
   krbd_destroy(krbd);
   return r;
+#else
+  return ENOTSUP;
+#endif
 }
 
 static int do_kernel_showmapped(Formatter *f)
 {
+#if defined(__linux__)
   struct krbd_ctx *krbd;
   int r;
 
@@ -2334,10 +2341,14 @@ static int do_kernel_showmapped(Formatter *f)
 
   krbd_destroy(krbd);
   return r;
+#else
+  return ENOTSUP;
+#endif
 }
 
 static int do_kernel_unmap(const char *dev)
 {
+#if defined(__linux__)
   struct krbd_ctx *krbd;
   int r;
 
@@ -2349,6 +2360,9 @@ static int do_kernel_unmap(const char *dev)
 
   krbd_destroy(krbd);
   return r;
+#else
+  return ENOTSUP;
+#endif
 }
 
 static string map_option_uuid_cb(const char *value_char)
