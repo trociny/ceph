@@ -18,6 +18,8 @@
 #include "cls/rbd/cls_rbd.h"
 #include "cls/rbd/cls_rbd_client.h"
 
+#include "cls/journal/cls_journal_client.h"
+
 #include "librbd/AioCompletion.h"
 #include "librbd/AioImageRequest.h"
 #include "librbd/AioImageRequestWQ.h"
@@ -279,6 +281,42 @@ int invoke_async_request(ImageCtx *ictx, const std::string& request_type,
     // clear deprecated fields
     info.parent_pool = -1L;
     info.parent_name[0] = '\0';
+  }
+
+  static const std::string JOURNAL_HEADER_PREFIX = "journal.";
+
+  void image_journal_info(ImageCtx *ictx, image_journal_info_t& journal)
+  {
+    C_SaferCond cond;
+    uint8_t order = 0;
+    uint8_t splay_width = 0;
+    uint64_t minimum_set = 0;
+    uint64_t active_set = 0;
+    std::set<cls::journal::Client> clients;
+
+    journal.oid = JOURNAL_HEADER_PREFIX + ictx->id;
+
+    cls::journal::client::get_immutable_metadata(ictx->md_ctx, journal.oid,
+						 &order, &splay_width, &cond);
+    if (cond.wait() < 0) {
+      return;
+    }
+    journal.order = order;
+    journal.splay_width = splay_width;
+
+    cls::journal::client::get_mutable_metadata(ictx->md_ctx, journal.oid,
+					       &minimum_set, &active_set,
+					       &clients, &cond);
+    if (cond.wait() < 0) {
+      return;
+    }
+    journal.minimum_set = minimum_set;
+    journal.active_set = active_set;
+
+    for (std::set<cls::journal::Client>::iterator c = clients.begin();
+	 c != clients.end(); c++) {
+      journal.clients.push_back(c->id + ":" + c->description);
+    }
   }
 
   uint64_t oid_to_object_no(const string& oid, const string& object_prefix)
@@ -1318,6 +1356,30 @@ int invoke_async_request(ImageCtx *ictx, const std::string& request_type,
       return r;
 
     image_info(ictx, info, infosize);
+    return 0;
+  }
+
+  int journal_info(ImageCtx *ictx, image_journal_info_t& journal)
+  {
+    ldout(ictx->cct, 20) << "journal_info " << ictx << dendl;
+
+    int r = ictx_check(ictx);
+    if (r < 0)
+      return r;
+
+    image_journal_info(ictx, journal);
+    return 0;
+  }
+
+  int journal_info(ImageCtx *ictx, image_journal_info_t& journal)
+  {
+    ldout(ictx->cct, 20) << "journal_info " << ictx << dendl;
+
+    int r = ictx_check(ictx);
+    if (r < 0)
+      return r;
+
+    image_journal_info(ictx, journal);
     return 0;
   }
 

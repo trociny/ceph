@@ -322,6 +322,24 @@ namespace librbd {
     return r;
   }
 
+  int Image::journal_info(image_journal_info_t& journal)
+  {
+    ImageCtx *ictx = (ImageCtx *)ctx;
+    //tracepoint(librbd, journal_info_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only);
+    int r = librbd::journal_info(ictx, journal);
+    //tracepoint(librbd, journal_info_exit, r, &journal);
+    return r;
+  }
+
+  int Image::journal_info(image_journal_info_t& journal)
+  {
+    ImageCtx *ictx = (ImageCtx *)ctx;
+    //tracepoint(librbd, journal_info_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only);
+    int r = librbd::journal_info(ictx, journal);
+    //tracepoint(librbd, journal_info_exit, r, &journal);
+    return r;
+  }
+
   int Image::old_format(uint8_t *old)
   {
     ImageCtx *ictx = (ImageCtx *)ctx;

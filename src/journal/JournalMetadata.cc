@@ -207,14 +207,17 @@ void JournalMetadata::set_commit_position(
                    << ", new=" << commit_position << dendl;
   if (commit_position <= m_client.commit_position ||
       commit_position <= m_commit_position) {
+    ldout(m_cct, 20) << __func__ << "on_safe->complete(-ESTALE)" << dendl;
     on_safe->complete(-ESTALE);
     return;
   }
 
   if (m_commit_position_ctx != NULL) {
+    ldout(m_cct, 20) << __func__ << "m_commit_position_ctx->complete(-ESTALE)" << dendl;
     m_commit_position_ctx->complete(-ESTALE);
   }
 
+  ldout(m_cct, 20) << __func__ << " updating commit_position" << dendl;
   m_client.commit_position = commit_position;
   m_commit_position = commit_position;
   m_commit_position_ctx = on_safe;
@@ -397,10 +400,12 @@ bool JournalMetadata::committed(uint64_t commit_tid,
   }
 
   bool update_commit_position = false;
+  ldout(m_cct, 20) << "m_pending_commit_tids.empty()=" << m_pending_commit_tids.empty() << dendl;
   while (!m_pending_commit_tids.empty()) {
     CommitTids::iterator it = m_pending_commit_tids.begin();
     CommitEntry &commit_entry = it->second;
     if (!commit_entry.committed) {
+      ldout(m_cct, 20) << "!commit_entry.committed, tid = " << it->first << dendl;
       break;
     }
 
@@ -459,6 +464,34 @@ void JournalMetadata::async_notify_update() {
 
 void JournalMetadata::handle_notified(int r) {
   ldout(m_cct, 10) << "notified journal header update: r=" << r << dendl;
+}
+
+std::ostream &operator<<(std::ostream &os,
+			 const JournalMetadata::RegisteredClients &clients) {
+  os << "[";
+  for (JournalMetadata::RegisteredClients::const_iterator c = clients.begin();
+       c != clients.end(); c++) {
+    os << (c == clients.begin() ? "" : ", " ) << *c;
+  }
+  os << "]";
+  return os;
+}
+
+std::ostream &operator<<(std::ostream &os,
+                         const JournalMetadata &jm) {
+  Mutex::Locker locker(jm.m_lock);
+  os << "[oid=" << jm.m_oid << ", "
+     << "initialized=" << jm.m_initialized << ", "
+     << "order=" << (int)jm.m_order << ", "
+     << "splay_width=" << (int)jm.m_splay_width << ", "
+     << "minimum_set=" << jm.m_minimum_set << ", "
+     << "active_set=" << jm.m_active_set << ", "
+     << "client_id=" << jm.m_client_id << ", "
+     << "commit_tid=" << jm.m_commit_tid << ", "
+     << "commit_interval=" << jm.m_commit_interval << ", "
+     << "commit_position=" << jm.m_commit_position << ", "
+     << "registered_clients=" << jm.m_registered_clients << "]";
+  return os;
 }
 
 } // namespace journal

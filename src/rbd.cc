@@ -560,6 +560,7 @@ static int do_show_info(const char *imgname, librbd::Image& image,
 			const char *snapname, Formatter *f)
 {
   librbd::image_info_t info;
+  librbd::image_journal_info_t journal;
   string parent_pool, parent_name, parent_snapname;
   uint8_t old_format;
   uint64_t overlap, features, flags;
@@ -661,6 +662,38 @@ static int do_show_info(const char *imgname, librbd::Image& image,
       cout << "\tstripe unit: " << prettybyte_t(image.get_stripe_unit())
 	   << std::endl
 	   << "\tstripe count: " << image.get_stripe_count() << std::endl;
+    }
+  }
+
+  // journal info, if feature is set
+  if ((features & RBD_FEATURE_JOURNALING) != 0 &&
+      image.journal_info(journal) == 0) {
+    cout << "\tjournal: " << std::endl;
+    cout << "\t  oid         : " << journal.oid << std::endl;
+    cout << "\t  order       : " << (int)journal.order << std::endl;
+    cout << "\t  splay_width : " << (int)journal.splay_width << std::endl;
+    cout << "\t  minimum_set : " << journal.minimum_set << std::endl;
+    cout << "\t  active_set  : " << journal.active_set << std::endl;
+    cout << "\t  clients     : " << std::endl;
+    for (std::vector<std::string>::iterator c = journal.clients.begin();
+	 c != journal.clients.end(); c++) {
+      cout << "\t    " << *c << std::endl;
+    }
+  }
+
+  // journal info, if feature is set
+  if ((features & RBD_FEATURE_JOURNALING) != 0 &&
+      image.journal_info(journal) == 0) {
+    cout << "\tjournal: " << std::endl;
+    cout << "\t  oid         : " << journal.oid << std::endl;
+    cout << "\t  order       : " << (int)journal.order << std::endl;
+    cout << "\t  splay_width : " << (int)journal.splay_width << std::endl;
+    cout << "\t  minimum_set : " << journal.minimum_set << std::endl;
+    cout << "\t  active_set  : " << journal.active_set << std::endl;
+    cout << "\t  clients     : " << std::endl;
+    for (std::vector<std::string>::iterator c = journal.clients.begin();
+	 c != journal.clients.end(); c++) {
+      cout << "\t    " << *c << std::endl;
     }
   }
 

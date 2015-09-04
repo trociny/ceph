@@ -389,6 +389,7 @@ void Journal::create_journaler() {
 
   assert(m_lock.is_locked());
   assert(m_state == STATE_UNINITIALIZED);
+  assert(m_journaler == NULL);
 
   // TODO allow alternate pool for journal objects
   m_close_pending = false;
@@ -448,6 +449,8 @@ void Journal::handle_initialized(int r) {
     return;
   }
 
+  ldout(cct, 20) << __func__ << ": Journaler" << *m_journaler << dendl;
+
   m_journal_replay = new JournalReplay(m_image_ctx);
 
   transition_state(STATE_REPLAYING);
@@ -457,7 +460,8 @@ void Journal::handle_initialized(int r) {
 void Journal::handle_replay_ready() {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << dendl;
-
+  ldout(cct, 20) << __func__ << ": Journaler" << *m_journaler << dendl;
+  
   Mutex::Locker locker(m_lock);
   if (m_state != STATE_REPLAYING) {
     return;
@@ -489,6 +493,7 @@ void Journal::handle_replay_ready() {
 
 void Journal::handle_replay_complete(int r) {
   CephContext *cct = m_image_ctx.cct;
+  ldout(cct, 20) << __func__ << ": Journaler" << *m_journaler << dendl;
 
   {
     Mutex::Locker locker(m_lock);
@@ -633,6 +638,8 @@ int Journal::stop_recording() {
   assert(m_lock.is_locked());
   assert(m_journaler != NULL);
 
+  CephContext *cct = m_image_ctx.cct;
+  ldout(cct, 20) << __func__ << ": Journaler" << *m_journaler << dendl;
   transition_state(STATE_STOPPING_RECORDING);
 
   C_SaferCond cond;

@@ -62,6 +62,7 @@ JournalPlayer::JournalPlayer(librados::IoCtx &ioctx,
 
   ObjectSetPosition commit_position;
   m_journal_metadata->get_commit_position(&commit_position);
+  ldout(m_cct, 10) << __func__ << ": commit_position.entry_positions.empty() = " << commit_position.entry_positions.empty() << dendl;
   if (!commit_position.entry_positions.empty()) {
     uint8_t splay_width = m_journal_metadata->get_splay_width();
     m_splay_offset = commit_position.object_number % splay_width;
@@ -231,7 +232,10 @@ int JournalPlayer::process_prefetch() {
     assert(!object_player->is_fetch_in_progress());
 
     ldout(m_cct, 15) << "seeking known commit position in "
-                     << object_player->get_oid() << dendl;
+                     << object_player->get_oid()
+		     << " m_commit_tids.empty() = " << m_commit_tids.empty()
+		     << " object_player->empty() = " << object_player->empty()
+		     << dendl;
     Entry entry;
     while (!m_commit_tids.empty() && !object_player->empty()) {
       object_player->front(&entry);

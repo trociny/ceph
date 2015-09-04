@@ -47,6 +47,15 @@ namespace librbd {
 
   typedef rbd_image_info_t image_info_t;
 
+  typedef struct {
+    std::string oid;
+    uint8_t order;
+    uint8_t splay_width;
+    uint64_t minimum_set;
+    uint64_t active_set;
+    std::vector<std::string> clients;
+  } image_journal_info_t;
+
   class CEPH_RBD_API ProgressContext
   {
   public:
@@ -165,6 +174,9 @@ public:
   int snap_unprotect(const char *snap_name);
   int snap_is_protected(const char *snap_name, bool *is_protected);
   int snap_set(const char *snap_name);
+
+  /* journal */
+  int journal_info(image_journal_info_t &journal);
 
   /* I/O */
   ssize_t read(uint64_t ofs, size_t len, ceph::bufferlist& bl);

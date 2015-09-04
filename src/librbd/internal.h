@@ -91,6 +91,7 @@ namespace librbd {
   int rename(librados::IoCtx& io_ctx, const char *srcname, const char *dstname);
   void rename_helper(ImageCtx *ictx, Context *ctx, const char *dstname);
   int info(ImageCtx *ictx, image_info_t& info, size_t image_size);
+  int journal_info(ImageCtx *ictx, image_journal_info_t& journal);
   int get_old_format(ImageCtx *ictx, uint8_t *old);
   int get_size(ImageCtx *ictx, uint64_t *size);
   int get_features(ImageCtx *ictx, uint64_t *features);
@@ -160,6 +161,7 @@ namespace librbd {
   int tmap_set(librados::IoCtx& io_ctx, const std::string& imgname);
   int tmap_rm(librados::IoCtx& io_ctx, const std::string& imgname);
   void image_info(const ImageCtx *ictx, image_info_t& info, size_t info_size);
+  void image_journal_info(const ImageCtx *ictx, image_journal_info_t& journal);
   uint64_t oid_to_object_no(const std::string& oid,
 			    const std::string& object_prefix);
   int clip_io(ImageCtx *ictx, uint64_t off, uint64_t *len);

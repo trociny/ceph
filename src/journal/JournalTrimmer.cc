@@ -59,6 +59,7 @@ void JournalTrimmer::committed(uint64_t commit_tid) {
 
   ObjectSetPosition object_set_position;
   if (!m_journal_metadata->committed(commit_tid, &object_set_position)) {
+    ldout(m_cct, 20) << __func__ << ": !m_journal_metadata->committed()" << dendl;
     return;
   }
 
