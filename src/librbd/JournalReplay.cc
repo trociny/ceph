@@ -21,7 +21,7 @@ JournalReplay::~JournalReplay() {
   assert(m_aio_completions.empty());
 }
 
-int JournalReplay::process(bufferlist::iterator it) {
+int JournalReplay::process(bufferlist::iterator it, uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << dendl;
 
@@ -34,7 +34,7 @@ int JournalReplay::process(bufferlist::iterator it) {
     return -EINVAL;
   }
 
-  boost::apply_visitor(EventVisitor(this), event_entry.event);
+  boost::apply_visitor(EventVisitor(this, commit_tid), event_entry.event);
   return 0;
 }
 
@@ -49,89 +49,103 @@ int JournalReplay::flush() {
   return m_ret_val;
 }
 
-void JournalReplay::handle_event(const journal::AioDiscardEvent &event) {
+void JournalReplay::handle_event(const journal::AioDiscardEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": AIO discard event" << dendl;
 
-  AioCompletion *aio_comp = create_aio_completion();
+  AioCompletion *aio_comp = create_aio_completion(commit_tid);
   AioImageRequest::aio_discard(&m_image_ctx, aio_comp, event.offset,
                                event.length);
 }
 
-void JournalReplay::handle_event(const journal::AioWriteEvent &event) {
+void JournalReplay::handle_event(const journal::AioWriteEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": AIO write event" << dendl;
 
   bufferlist data = event.data;
-  AioCompletion *aio_comp = create_aio_completion();
+  AioCompletion *aio_comp = create_aio_completion(commit_tid);
   AioImageRequest::aio_write(&m_image_ctx, aio_comp, event.offset, event.length,
                              data.c_str(), 0);
 }
 
-void JournalReplay::handle_event(const journal::AioFlushEvent &event) {
+void JournalReplay::handle_event(const journal::AioFlushEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": AIO flush event" << dendl;
 
-  AioCompletion *aio_comp = create_aio_completion();
+  AioCompletion *aio_comp = create_aio_completion(commit_tid);
   AioImageRequest::aio_flush(&m_image_ctx, aio_comp);
 }
 
-void JournalReplay::handle_event(const journal::OpFinishEvent &event) {
+void JournalReplay::handle_event(const journal::OpFinishEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Op finish event" << dendl;
 }
 
-void JournalReplay::handle_event(const journal::SnapCreateEvent &event) {
+void JournalReplay::handle_event(const journal::SnapCreateEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Snap create event" << dendl;
 }
 
-void JournalReplay::handle_event(const journal::SnapRemoveEvent &event) {
+void JournalReplay::handle_event(const journal::SnapRemoveEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Snap remove event" << dendl;
 }
 
-void JournalReplay::handle_event(const journal::SnapProtectEvent &event) {
+void JournalReplay::handle_event(const journal::SnapProtectEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Snap protect event" << dendl;
 }
 
-void JournalReplay::handle_event(const journal::SnapUnprotectEvent &event) {
+void JournalReplay::handle_event(const journal::SnapUnprotectEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Snap unprotect event"
                  << dendl;
 }
 
-void JournalReplay::handle_event(const journal::SnapRollbackEvent &event) {
+void JournalReplay::handle_event(const journal::SnapRollbackEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Snap rollback start event"
                  << dendl;
 }
 
-void JournalReplay::handle_event(const journal::RenameEvent &event) {
+void JournalReplay::handle_event(const journal::RenameEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Rename event" << dendl;
 }
 
-void JournalReplay::handle_event(const journal::ResizeEvent &event) {
+void JournalReplay::handle_event(const journal::ResizeEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Resize start event" << dendl;
 }
 
-void JournalReplay::handle_event(const journal::FlattenEvent &event) {
+void JournalReplay::handle_event(const journal::FlattenEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": Flatten start event" << dendl;
 }
 
-void JournalReplay::handle_event(const journal::UnknownEvent &event) {
+void JournalReplay::handle_event(const journal::UnknownEvent &event,
+				 uint64_t commit_tid) {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << ": unknown event" << dendl;
 }
 
-AioCompletion *JournalReplay::create_aio_completion() {
+AioCompletion *JournalReplay::create_aio_completion(uint64_t commit_tid) {
   Mutex::Locker locker(m_lock);
   AioCompletion *aio_comp = aio_create_completion_internal(
     this, &aio_completion_callback);
+  aio_comp->associate_journal_event(commit_tid);
   m_aio_completions.insert(aio_comp);
   return aio_comp;
 }

@@ -315,6 +315,8 @@ void Journal::commit_io_event(uint64_t tid, int r) {
   Mutex::Locker event_locker(m_event_lock);
   Events::iterator it = m_events.find(tid);
   if (it == m_events.end()) {
+    ldout(cct, 20) << this << " " << __func__ << ": tid=" << tid << ": not found" << dendl;
+    m_journaler->committed(tid);
     return;
   }
   complete_event(it, r);
@@ -536,7 +538,7 @@ void Journal::handle_replay_ready() {
     m_lock.Unlock();
     bufferlist data = replay_entry.get_data();
     bufferlist::iterator it = data.begin();
-    int r = m_journal_replay->process(it);
+    int r = m_journal_replay->process(it, replay_entry.get_commit_tid());
     m_lock.Lock();
 
     if (r < 0) {

@@ -54,6 +54,7 @@ public:
   void flush(Context *on_safe);
   void stop_append(Context *on_safe);
 
+  void committed(uint64_t commit_tid);
   void committed(const ReplayEntry &replay_entry);
   void committed(const Future &future);
 

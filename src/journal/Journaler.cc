@@ -192,6 +192,10 @@ void Journaler::stop_replay() {
   m_player = NULL;
 }
 
+void Journaler::committed(uint64_t commit_tid) {
+  m_trimmer->committed(commit_tid);
+}
+
 void Journaler::committed(const ReplayEntry &replay_entry) {
   m_trimmer->committed(replay_entry.get_commit_tid());
 }

@@ -23,7 +23,7 @@ public:
   JournalReplay(ImageCtx &image_ctx);
   ~JournalReplay();
 
-  int process(bufferlist::iterator it);
+  int process(bufferlist::iterator it, uint64_t commit_tid);
   int flush();
 
 private:
@@ -31,14 +31,15 @@ private:
 
   struct EventVisitor : public boost::static_visitor<void> {
     JournalReplay *journal_replay;
+    uint64_t commit_tid;
 
-    EventVisitor(JournalReplay *_journal_replay)
-      : journal_replay(_journal_replay) {
+    EventVisitor(JournalReplay *_journal_replay, uint64_t _commit_tid)
+      : journal_replay(_journal_replay), commit_tid(_commit_tid) {
     }
 
     template <typename Event>
     inline void operator()(const Event &event) const {
-      journal_replay->handle_event(event);
+      journal_replay->handle_event(event, commit_tid);
     }
   };
 
@@ -50,21 +51,21 @@ private:
   AioCompletions m_aio_completions;
   int m_ret_val;
 
-  void handle_event(const journal::AioDiscardEvent &event);
-  void handle_event(const journal::AioWriteEvent &event);
-  void handle_event(const journal::AioFlushEvent &event);
-  void handle_event(const journal::OpFinishEvent &event);
-  void handle_event(const journal::SnapCreateEvent &event);
-  void handle_event(const journal::SnapRemoveEvent &event);
-  void handle_event(const journal::SnapProtectEvent &event);
-  void handle_event(const journal::SnapUnprotectEvent &event);
-  void handle_event(const journal::SnapRollbackEvent &event);
-  void handle_event(const journal::RenameEvent &event);
-  void handle_event(const journal::ResizeEvent &event);
-  void handle_event(const journal::FlattenEvent &event);
-  void handle_event(const journal::UnknownEvent &event);
+  void handle_event(const journal::AioDiscardEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::AioWriteEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::AioFlushEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::OpFinishEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::SnapCreateEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::SnapRemoveEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::SnapProtectEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::SnapUnprotectEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::SnapRollbackEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::RenameEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::ResizeEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::FlattenEvent &event, uint64_t commit_tid);
+  void handle_event(const journal::UnknownEvent &event, uint64_t commit_tid);
 
-  AioCompletion *create_aio_completion();
+  AioCompletion *create_aio_completion(uint64_t commit_tid);
   void handle_aio_completion(AioCompletion *aio_comp);
 
   static void aio_completion_callback(completion_t cb, void *arg);
