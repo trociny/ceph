@@ -15,7 +15,9 @@
 #ifndef CEPH_LIB_H
 #define CEPH_LIB_H
 
+#ifdef HAVE_FEATURES_H
 #include <features.h>
+#endif
 #include <utime.h>
 #include <sys/stat.h>
 #include <sys/types.h>
