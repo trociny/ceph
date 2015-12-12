@@ -17,7 +17,7 @@ if WITH_SLIBROCKSDB
 # for some stupid reason this needs -fPIC...
 # PORTABLE=1 fixes the aarch64 build (-march=native doesn't work there)
 rocksdb/librocksdb.a:
-	cd rocksdb && EXTRA_CXXFLAGS=-fPIC PORTABLE=1 make -j$(shell nproc) static_lib
+	cd rocksdb && CC=${CC} CXX=${CXX} EXTRA_CXXFLAGS=-fPIC PORTABLE=1 $(MAKE) ${MAKEFLAGS} static_lib
 libkv_a_CXXFLAGS += -I rocksdb/include -fPIC
 libkv_a_SOURCES += kv/RocksDBStore.cc
 libkv_a_LIBADD += rocksdb/librocksdb.a
