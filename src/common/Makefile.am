@@ -70,7 +70,8 @@ libcommon_internal_la_SOURCES = \
 	common/Cycles.cc \
 	common/ContextCompletion.cc \
 	common/TracepointProvider.cc \
-	common/PluginRegistry.cc
+	common/PluginRegistry.cc \
+	common/linux_version.c
 
 common/PluginRegistry.cc: ./ceph_ver.h
 
@@ -81,11 +82,6 @@ libcommon_internal_la_SOURCES += \
 	common/ceph_json.cc \
 	common/util.cc \
 	common/pick_address.cc
-endif
-
-if LINUX
-libcommon_internal_la_SOURCES += \
-	common/linux_version.c 
 endif
 
 if SOLARIS
@@ -99,10 +95,8 @@ libcommon_internal_la_SOURCES += \
 endif
 
 # used by RBD and FileStore
-if LINUX
 libcommon_internal_la_SOURCES += \
 	common/blkdev.cc
-endif
 
 if ENABLE_XIO
 libcommon_internal_la_SOURCES += \
