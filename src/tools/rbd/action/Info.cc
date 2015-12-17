@@ -59,7 +59,8 @@ static void format_flags(Formatter *f, uint64_t flags)
 {
   std::map<uint64_t, std::string> mapping = {
     {RBD_FLAG_OBJECT_MAP_INVALID, "object map invalid"},
-    {RBD_FLAG_FAST_DIFF_INVALID, "fast diff invalid"}};
+    {RBD_FLAG_FAST_DIFF_INVALID, "fast diff invalid"},
+    {RBD_FLAG_MIRRORING_ENABLED, "mirroring enabled"}};
   format_bitmask(f, "flag", mapping, flags);
 }
 

@@ -1275,10 +1275,35 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
         lderr(cct) << "error creating journal: " << cpp_strerror(r) << dendl;
         goto err_remove_object_map;
       }
+
+      bool pool_mirrored;
+      r = cls_client::mirror_is_enabled(&io_ctx, &pool_mirrored);
+      if (r < 0) {
+	lderr(cct) << "error reading pool mirroring settings: "
+		   << cpp_strerror(r) << dendl;
+	goto err_remove_journal;
+      }
+      if (pool_mirrored) {
+	r = cls_client::set_flags(&io_ctx, header_oid, CEPH_NOSNAP,
+				  RBD_FLAG_MIRRORING_ENABLED,
+				  RBD_FLAG_MIRRORING_ENABLED);
+	if (r < 0) {
+	  lderr(cct) << "error setting mirroring flag: "
+		     << cpp_strerror(r) << dendl;
+	  goto err_remove_journal;
+	}
+      }
     }
 
     ldout(cct, 2) << "done." << dendl;
     return 0;
+
+  err_remove_journal:
+    remove_r = Journal::remove(io_ctx, id);
+    if (remove_r < 0) {
+      lderr(cct) << "error cleaning up journal after creation failed: "
+		 << cpp_strerror(remove_r) << dendl;
+    }
 
   err_remove_object_map:
     if ((features & RBD_FEATURE_OBJECT_MAP) != 0) {
@@ -1875,6 +1900,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
           disable_flags = RBD_FLAG_FAST_DIFF_INVALID;
         }
         if ((features & RBD_FEATURE_JOURNALING) != 0) {
+	  disable_flags = RBD_FLAG_MIRRORING_ENABLED;
           r = Journal::remove(ictx->md_ctx, ictx->id);
           if (r < 0) {
             lderr(cct) << "error removing image journal: " << cpp_strerror(r)
@@ -1996,6 +2022,19 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
     RWLock::RLocker l2(ictx->snap_lock);
     return ictx->get_flags(ictx->snap_id, flags);
+  }
+
+  int set_flags(ImageCtx *ictx, uint64_t flags, bool enabled)
+  {
+    int r = ictx->state->refresh_if_required();
+    if (r < 0) {
+      return r;
+    }
+
+    // TODO: implement
+    RWLock::RLocker l2(ictx->snap_lock);
+    //return ictx->get_flags(ictx->snap_id, flags);
+    return 0;
   }
 
   int set_image_notification(ImageCtx *ictx, int fd, int type)

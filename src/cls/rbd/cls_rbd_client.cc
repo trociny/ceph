@@ -323,11 +323,19 @@ namespace librbd {
       bufferlist out_bl;
       int r = ioctx->operate(oid, &op, &out_bl);
       if (r < 0) {
-        return r;
+	return r;
       }
 
       bufferlist::iterator it = out_bl.begin();
       return get_flags_finish(&it, flags, snap_ids, snap_flags);
+    }
+
+    int set_flags(librados::IoCtx *ioctx, const std::string &oid,
+		  snapid_t snap_id, uint64_t flags, uint64_t mask)
+    {
+      librados::ObjectWriteOperation op;
+      set_flags(&op, snap_id, flags, mask);
+      return ioctx->operate(oid, &op);
     }
 
     void set_flags(librados::ObjectWriteOperation *op, snapid_t snap_id,

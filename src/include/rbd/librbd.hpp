@@ -167,6 +167,7 @@ public:
   int update_features(uint64_t features, bool enabled);
   int overlap(uint64_t *overlap);
   int get_flags(uint64_t *flags);
+  int update_flags(uint64_t flags, bool enabled);
   int set_image_notification(int fd, int type);
 
   /* exclusive lock feature */

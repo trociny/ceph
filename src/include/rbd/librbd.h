@@ -50,6 +50,7 @@ extern "C" {
 
 #define RBD_FLAG_OBJECT_MAP_INVALID   (1<<0)
 #define RBD_FLAG_FAST_DIFF_INVALID    (1<<1)
+#define RBD_FLAG_MIRRORING_ENABLED    (1<<2)
 
 typedef void *rbd_snap_t;
 typedef void *rbd_image_t;
@@ -230,6 +231,7 @@ CEPH_RBD_API int rbd_get_parent_info(rbd_image_t image,
 			             char *parent_snapname,
                                      size_t psnapnamelen);
 CEPH_RBD_API int rbd_get_flags(rbd_image_t image, uint64_t *flags);
+CEPH_RBD_API int rbd_update_flags(rbd_image_t image, uint64_t flags, bool enabled);
 CEPH_RBD_API int rbd_set_image_notification(rbd_image_t image, int fd, int type);
 
 /* exclusive lock feature */

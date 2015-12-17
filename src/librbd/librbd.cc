@@ -545,6 +545,15 @@ namespace librbd {
     return r;
   }
 
+  int Image::update_flags(uint64_t flags, bool enabled)
+  {
+    ImageCtx *ictx = (ImageCtx *)ctx;
+    tracepoint(librbd, update_flags_enter, ictx, flags, enabled);
+    int r = librbd::set_flags(ictx, flags, enabled);
+    tracepoint(librbd, update_flags_exit, ictx, r);
+    return r;
+  }
+
   int Image::set_image_notification(int fd, int type)
   {
     ImageCtx *ictx = (ImageCtx *)ctx;
@@ -1751,6 +1760,15 @@ extern "C" int rbd_get_flags(rbd_image_t image, uint64_t *flags)
   tracepoint(librbd, get_flags_enter, ictx);
   int r = librbd::get_flags(ictx, flags);
   tracepoint(librbd, get_flags_exit, ictx, r, *flags);
+  return r;
+}
+
+extern "C" int rbd_update_flags(rbd_image_t image, uint64_t flags, bool enabled)
+{
+  librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+  tracepoint(librbd, update_flags_enter, ictx, flags, enabled);
+  int r = librbd::set_flags(ictx, flags, enabled);
+  tracepoint(librbd, update_flags_exit, ictx, r);
   return r;
 }
 
