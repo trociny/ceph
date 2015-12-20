@@ -131,7 +131,8 @@ UNITTEST_CXXFLAGS = \
 	-I$(top_srcdir)/src/gmock/include \
 	-I$(top_builddir)/src/gmock/include \
 	-I$(top_srcdir)/src/gmock/gtest/include \
-	-I$(top_builddir)/src/gmock/gtest/include
+	-I$(top_builddir)/src/gmock/gtest/include \
+	-DGTEST_LANG_CXX11=1 -DGTEST_HAS_TR1_TUPLE=1
 UNITTEST_LDADD = \
 	$(top_builddir)/src/gmock/lib/libgmock_main.la \
 	$(top_builddir)/src/gmock/lib/libgmock.la \
