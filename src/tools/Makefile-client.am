@@ -77,13 +77,21 @@ rbd_LDADD += $(LIBKRBD)
 endif # LINUX
 bin_PROGRAMS += rbd
 
+rbd_nbd_SOURCES = \
+	tools/rbd_nbd/rbd-nbd.cc
+noinst_HEADERS += \
+	tools/rbd_nbd/NbdDrv.h
 if LINUX
-rbd_nbd_SOURCES = tools/rbd_nbd/rbd-nbd.cc
+rbd_nbd_SOURCES += \
+	tools/rbd_nbd/NbdDrv_linux.cc
+else
+rbd_nbd_SOURCES += \
+	tools/rbd_nbd/NbdDrv_dummy.cc
+endif # LINUX
+
 rbd_nbd_CXXFLAGS = $(AM_CXXFLAGS)
 rbd_nbd_LDADD = $(LIBRBD) $(LIBRADOS) $(CEPH_GLOBAL) $(BOOST_REGEX_LIBS)
 bin_PROGRAMS += rbd-nbd
-
-endif # LINUX
 
 endif # WITH_RBD
 
