@@ -1,19 +1,15 @@
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+// vim: ts=8 sw=2 smarttab
 #include "include/int_types.h"
+
+#include <sys/types.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <string.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <assert.h>
-
-#include <linux/nbd.h>
-#include <linux/fs.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
 
 #include <iostream>
 #include <boost/regex.hpp>
@@ -22,14 +18,14 @@
 #include "common/config.h"
 
 #include "common/errno.h"
-#include "common/module.h"
-#include "common/safe_io.h"
 #include "common/ceph_argparse.h"
 #include "common/Preforker.h"
 #include "global/global_init.h"
 
 #include "include/rados/librados.hpp"
 #include "include/rbd/librbd.hpp"
+
+#include "nbd_drv.h"
 
 static void usage()
 {
@@ -47,24 +43,15 @@ static std::string devpath, poolname("rbd"), imgname, snapname;
 static bool readonly = false;
 static int nbds_max = 0;
 
-#ifdef CEPH_BIG_ENDIAN
-#define ntohll(a) (a)
-#elif defined(CEPH_LITTLE_ENDIAN)
-#define ntohll(a) swab64(a)
-#else
-#error "Could not determine endianess"
-#endif
-#define htonll(a) ntohll(a)
-
 class NBDServer
 {
 private:
-  int fd;
+  nbd_drv_t drv;
   librbd::Image &image;
 
 public:
-  NBDServer(int _fd, librbd::Image& _image)
-    : fd(_fd)
+  NBDServer(nbd_drv_t _drv, librbd::Image& _image)
+    : drv(_drv)
     , image(_image)
     , terminated(false)
     , lock("NBDServer::Locker")
@@ -79,7 +66,7 @@ private:
   void shutdown()
   {
     if (terminated.compare_and_swap(false, true)) {
-      ::shutdown(fd, SHUT_RDWR);
+      nbd_drv_shutdown(drv);
 
       Mutex::Locker l(lock);
       cond.Signal();
@@ -90,10 +77,8 @@ private:
   {
     xlist<IOContext*>::item item;
     NBDServer *server;
-    struct nbd_request request;
-    struct nbd_reply reply;
+    nbd_drv_req_t req;
     bufferlist data;
-    int command;
 
     IOContext()
       : item(this)
@@ -155,9 +140,12 @@ private:
 
     IOContext *ctx = reinterpret_cast<IOContext *>(arg);
     int ret = aio_completion->get_return_value();
-    if (ret > 0)
+    if (ret > 0) {
+      assert(ret == (int)nbd_drv_req_length(ctx->req));
+      nbd_drv_req_set_data(ctx->req, ctx->data.c_str());
       ret = 0;
-    ctx->reply.error = htonl(ret);
+    }
+    nbd_drv_req_set_error(ctx->req, -ret);
     ctx->server->io_finish(ctx);
 
     aio_completion->release();
@@ -168,52 +156,40 @@ private:
     while (!terminated.read()) {
       ceph::unique_ptr<IOContext> ctx(new IOContext());
       ctx->server = this;
-      if (safe_read_exact(fd, &ctx->request, sizeof(struct nbd_request)) < 0)
-        return;
-
-      if (ctx->request.magic != htonl(NBD_REQUEST_MAGIC))
-        return;
-
-      ctx->request.from = ntohll(ctx->request.from);
-      ctx->request.type = ntohl(ctx->request.type);
-      ctx->request.len = ntohl(ctx->request.len);
-
-      ctx->reply.magic = htonl(NBD_REPLY_MAGIC);
-      memcpy(ctx->reply.handle, ctx->request.handle, sizeof(ctx->reply.handle));
-
-      ctx->command = ctx->request.type & 0x0000ffff;
-
-      switch (ctx->command)
-      {
-        case NBD_CMD_DISC:
-          return;
-        case NBD_CMD_WRITE:
-          bufferptr ptr(ctx->request.len);
-          if (safe_read_exact(fd, ptr.c_str(), ctx->request.len) < 0)
-            return;
-          ctx->data.push_back(ptr);
-          break;
+      int r = nbd_drv_recv(drv, &ctx->req);
+      if (r < 0) {
+	if (r != -EINTR || !nbd_drv_is_shutdown(drv)) {
+          std::cerr << "rbd-nbd: nbd_drv_recv: " << cpp_strerror(r)
+		    << std::endl;
+	}
+	return;
       }
 
       IOContext *pctx = ctx.release();
       io_start(pctx);
       librbd::RBD::AioCompletion *c = new librbd::RBD::AioCompletion(pctx, aio_callback);
-      switch (pctx->command)
+      int command = nbd_drv_req_cmd(pctx->req);
+      switch (command)
       {
-        case NBD_CMD_WRITE:
-          image.aio_write(pctx->request.from, pctx->request.len, pctx->data, c);
-          break;
-        case NBD_CMD_READ:
-          image.aio_read(pctx->request.from, pctx->request.len, pctx->data, c);
-          break;
-        case NBD_CMD_FLUSH:
-          image.aio_flush(c);
-          break;
-        case NBD_CMD_TRIM:
-          image.aio_discard(pctx->request.from, pctx->request.len, c);
-          break;
-        default:
-          return;
+      case NBD_DRV_CMD_WRITE:
+	ctx->data.push_back(bufferptr((const char*)nbd_drv_req_data(pctx->req),
+				      nbd_drv_req_length(pctx->req)));
+	image.aio_write(nbd_drv_req_offset(pctx->req),
+			nbd_drv_req_length(pctx->req), pctx->data, c);
+	break;
+      case NBD_DRV_CMD_READ:
+	image.aio_read(nbd_drv_req_offset(pctx->req),
+		       nbd_drv_req_length(pctx->req), pctx->data, c);
+	break;
+      case NBD_DRV_CMD_FLUSH:
+	image.aio_flush(c);
+	break;
+      case NBD_DRV_CMD_DISCARD:
+	image.aio_discard(nbd_drv_req_offset(pctx->req),
+			  nbd_drv_req_length(pctx->req), c);
+	break;
+      default:
+	return;
       }
     }
   }
@@ -225,11 +201,11 @@ private:
       if (!ctx)
         return;
 
-      if (safe_write(fd, &ctx->reply, sizeof(struct nbd_reply)) < 0)
-        return;
-      if (ctx->command == NBD_CMD_READ && ctx->reply.error == htonl(0)) {
-        if (ctx->data.write_fd(fd) < 0)
-          return;
+      int r = nbd_drv_send(drv, ctx->req);
+      if (r < 0) {
+	std::cerr << "rbd-nbd: nbd_drv_send: " << cpp_strerror(r)
+		  << std::endl;
+	return;
       }
     }
   }
@@ -291,18 +267,18 @@ public:
 class NBDWatchCtx : public librados::WatchCtx2
 {
 private:
-  int fd;
+  nbd_drv_t drv;
   librados::IoCtx &io_ctx;
   librbd::Image &image;
   std::string header_oid;
-  unsigned long size;
+  uint64_t size;
 public:
-  NBDWatchCtx(int _fd,
+  NBDWatchCtx(nbd_drv_t _drv,
               librados::IoCtx &_io_ctx,
               librbd::Image &_image,
               std::string &_header_oid,
               unsigned long _size)
-    : fd(_fd)
+    : drv(_drv)
     , io_ctx(_io_ctx)
     , image(_image)
     , header_oid(_header_oid)
@@ -318,13 +294,10 @@ public:
   {
     librbd::image_info_t info;
     if (image.stat(info, sizeof(info)) == 0) {
-      unsigned long new_size = info.size;
+      uint64_t new_size = info.size;
 
       if (new_size != size) {
-        if (ioctl(fd, BLKFLSBUF, NULL) < 0)
-          std::cerr << "rbd-nbd: invalidate page cache failed status: " << cpp_strerror(errno) << std::endl;
-        if (ioctl(fd, NBD_SET_SIZE, new_size) < 0)
-          std::cerr << "rbd-nbd: resize failed status: " << cpp_strerror(errno) << std::endl;
+	nbd_drv_notify(drv, new_size);
         if (image.invalidate_cache() < 0)
           std::cerr << "rbd-nbd: invalidate rbd cache failed" << std::endl;
         size = new_size;
@@ -341,27 +314,6 @@ public:
   }
 };
 
-static int open_device(const char* path, bool try_load_moudle = false)
-{
-  int nbd = open(path, O_RDWR);
-  if (nbd < 0 && try_load_moudle && access("/sys/module/nbd", F_OK) != 0) {
-    int r;
-    if (nbds_max) {
-      ostringstream param;
-      param << "nbds_max=" << nbds_max;
-      r = module_load("nbd", param.str().c_str());
-    } else {
-      r = module_load("nbd", NULL);
-    }
-    if (r < 0) {
-      cerr << "rbd-nbd: failed to load nbd kernel module: " << cpp_strerror(-r) << std::endl;
-      return r;
-    }
-    nbd = open(path, O_RDWR);
-  }
-  return nbd;
-}
-
 static int do_map()
 {
   int r;
@@ -371,117 +323,57 @@ static int do_map()
   librados::IoCtx io_ctx;
   librbd::Image image;
 
-  int read_only;
-  unsigned long flags;
-  unsigned long size;
+  nbd_drv_t drv;
 
-  int fd[2];
-  int nbd;
   int null_fd = -1;
 
   uint8_t old_format;
   librbd::image_info_t info;
 
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, fd) == -1) {
-    r = -errno;
-    goto close_ret;
+  const char *param = NULL;
+  if (nbds_max) {
+    ostringstream param_;
+    param_ << "nbds_max=" << nbds_max;
+    param = param_.str().c_str();
   }
-
-  if (devpath.empty()) {
-    char dev[64];
-    int index = 0;
-    while (true) {
-      snprintf(dev, sizeof(dev), "/dev/nbd%d", index);
-
-      nbd = open_device(dev, true);
-      if (nbd < 0) {
-        r = nbd;
-        cerr << "rbd-nbd: failed to find unused device" << std::endl;
-        goto close_fd;
-      }
-
-      r = ioctl(nbd, NBD_SET_SOCK, fd[0]);
-      if (r < 0) {
-        close(nbd);
-        ++index;
-        continue;
-      }
-
-      devpath = dev;
-      break;
-    }
-  } else {
-    nbd = open_device(devpath.c_str(), true);
-    if (nbd < 0) {
-      r = nbd;
-      cerr << "rbd-nbd: failed to open device: " << devpath << std::endl;
-      goto close_fd;
-    }
-
-    r = ioctl(nbd, NBD_SET_SOCK, fd[0]);
-    if (r < 0) {
-      r = -errno;
-      cerr << "rbd-nbd: the device " << devpath << " is busy" << std::endl;
-      close(nbd);
-      goto close_fd;
-    }
-  }
-
-  flags = NBD_FLAG_SEND_FLUSH | NBD_FLAG_SEND_TRIM | NBD_FLAG_HAS_FLAGS;
-  if (!snapname.empty() || readonly)
-    flags |= NBD_FLAG_READ_ONLY;
+  nbd_drv_load(param);
 
   r = rados.init_with_context(g_ceph_context);
   if (r < 0)
-    goto close_nbd;
+    goto close_ret;
 
   r = rados.connect();
   if (r < 0)
-    goto close_nbd;
+    goto close_ret;
 
   r = rados.ioctx_create(poolname.c_str(), io_ctx);
   if (r < 0)
-    goto close_nbd;
+    goto close_ret;
 
   r = rbd.open(io_ctx, image, imgname.c_str());
   if (r < 0)
-    goto close_nbd;
+    goto close_ret;
 
   if (!snapname.empty()) {
     r = image.snap_set(snapname.c_str());
     if (r < 0)
-      goto close_nbd;
+      goto close_ret;
   }
 
   r = image.stat(info, sizeof(info));
   if (r < 0)
-    goto close_nbd;
-
-  r = ioctl(nbd, NBD_SET_BLKSIZE, 512UL);
-  if (r < 0) {
-    r = -errno;
-    goto close_nbd;
-  }
-
-  size = info.size;
-  r = ioctl(nbd, NBD_SET_SIZE, size);
-  if (r < 0) {
-    r = -errno;
-    goto close_nbd;
-  }
-
-  ioctl(nbd, NBD_SET_FLAGS, flags);
-
-  read_only = snapname.empty() ? 0 : 1;
-  r = ioctl(nbd, BLKROSET, (unsigned long) &read_only);
-  if (r < 0) {
-    r = -errno;
-    goto close_nbd;
-  }
+    goto close_ret;
 
   r = image.old_format(&old_format);
   if (r < 0)
     goto close_nbd;
+
+  r = nbd_drv_create(devpath.c_str(), 512, info.size,
+		     readonly || !snapname.empty(), &drv);
+  if (r < 0) {
+    r = -errno;
+    goto close_ret;
+  }
 
   {
     string header_oid;
@@ -498,7 +390,7 @@ static int do_map()
       header_oid = RBD_HEADER_PREFIX + image_id;
     }
 
-    NBDWatchCtx watch_ctx(nbd, io_ctx, image, header_oid, info.size);
+    NBDWatchCtx watch_ctx(drv, io_ctx, image, header_oid, info.size);
     r = io_ctx.watch2(header_oid, &watcher, &watch_ctx);
     if (r < 0)
       goto close_nbd;
@@ -522,10 +414,10 @@ static int do_map()
     }
 
     {
-      NBDServer server(fd[1], image);
+      NBDServer server(drv, image);
 
       server.start();
-      ioctl(nbd, NBD_DO_IT);
+      nbd_drv_loop(drv);
       server.stop();
     }
 
@@ -534,14 +426,7 @@ close_watcher:
   }
 
 close_nbd:
-  if (r < 0) {
-    ioctl(nbd, NBD_CLEAR_SOCK);
-    cerr << "rbd-nbd: failed to map, status: " << cpp_strerror(-r) << std::endl;
-  }
-  close(nbd);
-close_fd:
-  close(fd[0]);
-  close(fd[1]);
+  nbd_drv_destroy(drv);
 close_ret:
   image.close();
   io_ctx.close();
@@ -551,18 +436,7 @@ close_ret:
 
 static int do_unmap()
 {
-  int nbd = open_device(devpath.c_str());
-  if (nbd < 0) {
-    cerr << "rbd-nbd: failed to open device: " << devpath << std::endl;
-    return nbd;
-  }
-
-  if (ioctl(nbd, NBD_DISCONNECT) < 0)
-    cerr << "rbd-nbd: the device is not used" << std::endl;
-  ioctl(nbd, NBD_CLEAR_SOCK);
-  close(nbd);
-
-  return 0;
+  return nbd_drv_kill(devpath.c_str());
 }
 
 static int parse_imgpath(const std::string &imgpath)
@@ -589,26 +463,16 @@ static void list_mapped_devices()
 {
   char path[64];
   int m = 0;
-  int fd[2];
-
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, fd) == -1)
-    return;
 
   while (true) {
     snprintf(path, sizeof(path), "/dev/nbd%d", m);
-    int nbd = open_device(path);
-    if (nbd < 0)
+    bool alive;
+    if (nbd_drv_status(path, &alive) < 0)
       break;
-    if (ioctl(nbd, NBD_SET_SOCK, fd[0]) != 0)
+    if (alive)
       cout << path << std::endl;
-    else
-      ioctl(nbd, NBD_CLEAR_SOCK);
-    close(nbd);
     m++;
   }
-
-  close(fd[0]);
-  close(fd[1]);
 }
 
 static int rbd_nbd(int argc, const char *argv[])
