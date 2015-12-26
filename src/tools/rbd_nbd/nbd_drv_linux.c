@@ -191,12 +191,13 @@ int nbd_drv_recv(nbd_drv_t drv_, nbd_drv_req_t *req_) {
 
   r = safe_read_exact(drv->fd, &request, sizeof(request));
   if (r < 0) {
+    errno = -r;
     warn("read request failed");
     return r;
   }
 
   if (request.magic != htonl(NBD_REQUEST_MAGIC)) {
-    warn("invalid request");
+    warnx("invalid request");
     return -EINVAL;
   }
 
@@ -218,6 +219,7 @@ int nbd_drv_recv(nbd_drv_t drv_, nbd_drv_req_t *req_) {
     }
     r = safe_read_exact(drv->fd, data, request.len);
     if (r < 0)
+      errno = -r;
       warn("read request data failed");
       free(data);
       return r;
@@ -332,7 +334,7 @@ int nbd_drv_kill(const char *devpath) {
   return 0;
 }
 
-int nbd_drv_status(char *path, bool *alive) {
+int nbd_drv_status(const char *path, bool *alive) {
   int fd[2], nbd, r;
 
   *alive = false;

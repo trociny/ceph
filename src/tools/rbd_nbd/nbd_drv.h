@@ -1,8 +1,8 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
-#ifndef CEPH_RBD_NBD_DRV_H
-#define CEPH_RBD_NBD_DRV_H
+#ifndef CEPH_NBD_DRV_H
+#define CEPH_NBD_DRV_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,10 +46,10 @@ void nbd_drv_req_set_error(nbd_drv_req_t req, int error);
 void nbd_drv_req_set_data(nbd_drv_req_t req, void *data);
 
 int nbd_drv_kill(const char *devspec);
-int nbd_drv_status(char *devspec, bool *alive);
+int nbd_drv_status(const char *devspec, bool *alive);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif //  CEPH_RBD_NBD_DRV_H
+#endif //  CEPH_NBD_DRV_H

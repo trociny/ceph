@@ -75,8 +75,10 @@ bin_PROGRAMS += rbd
 
 rbd_nbd_SOURCES = \
 	tools/rbd_nbd/rbd-nbd.cc \
+	tools/rbd_nbd/NbdDrv_linux.cc \
 	tools/rbd_nbd/nbd_drv_linux.c
 noinst_HEADERS += \
+	tools/rbd_nbd/NbdDrv.h \
 	tools/rbd_nbd/nbd_drv.h
 rbd_nbd_CXXFLAGS = $(AM_CXXFLAGS)
 rbd_nbd_LDADD = $(LIBRBD) $(LIBRADOS) $(CEPH_GLOBAL) $(BOOST_REGEX_LIBS)
