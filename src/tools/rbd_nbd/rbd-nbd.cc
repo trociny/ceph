@@ -157,8 +157,7 @@ private:
       int r = drv->recv(&ctx->req);
       if (r < 0) {
 	if (r != -EINTR || !drv->is_shutdown()) {
-          std::cerr << "rbd-nbd: nbd_drv_recv: " << cpp_strerror(r)
-		    << std::endl;
+          std::cerr << "rbd-nbd: recv: " << cpp_strerror(r) << std::endl;
 	}
 	return;
       }
@@ -170,11 +169,11 @@ private:
       {
       case rbd::NbdReq::Write:
 	image.aio_write(pctx->req->get_offset(), pctx->req->get_length(),
-			pctx->req->get_data(), c);
+			pctx->req->get_data_ref(), c);
 	break;
       case rbd::NbdReq::Read:
 	image.aio_read(pctx->req->get_offset(), pctx->req->get_length(),
-		       pctx->req->get_data(), c);
+		       pctx->req->get_data_ref(), c);
 	break;
       case rbd::NbdReq::Flush:
 	image.aio_flush(c);
@@ -183,6 +182,8 @@ private:
 	image.aio_discard(pctx->req->get_offset(), pctx->req->get_length(), c);
 	break;
       default:
+	std::cerr << "rbd-nbd: recv: unknown command: " << pctx->req->get_cmd()
+		  << std::endl;
 	return;
       }
     }
@@ -197,8 +198,7 @@ private:
 
       int r = drv->send(ctx->req);
       if (r < 0) {
-	std::cerr << "rbd-nbd: nbd_drv_send: " << cpp_strerror(r)
-		  << std::endl;
+	std::cerr << "rbd-nbd: send: " << cpp_strerror(r) << std::endl;
 	return;
       }
     }
