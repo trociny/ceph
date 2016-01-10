@@ -18,6 +18,11 @@
 #include <chrono>
 #include <ctime>
 
+#if defined(__FreeBSD__)
+#define CLOCK_MONOTONIC_COARSE	CLOCK_MONOTONIC_FAST
+#define CLOCK_REALTIME_COARSE	CLOCK_REALTIME_FAST
+#endif
+
 #include "include/encoding.h"
 
 class CephContext;
