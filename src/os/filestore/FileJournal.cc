@@ -1633,7 +1633,7 @@ int FileJournal::prepare_entry(list<ObjectStore::Transaction*>& tls, bufferlist*
   }
   // footer
   ebl.append((const char*)&h, sizeof(h));
-  ebl.rebuild_aligned(CEPH_MINIMUM_BLOCK_SIZE);
+  ebl.rebuild_aligned_size_and_memory(CEPH_MINIMUM_BLOCK_SIZE, header.alignment);
   tbl->claim(ebl);
   return h.len;
 }
