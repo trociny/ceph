@@ -193,9 +193,11 @@ void AioOpenImageAction::perform(ActionCtx &worker) {
   rbd_loc name(worker.map_image_name(m_action.name, m_action.snap_name));
   int r;
   if (m_action.read_only || worker.readonly()) {
-    r = rbd->open_read_only(*worker.ioctx(), *image, name.image.c_str(), name.snap.c_str());
+    r = rbd->aio_open_read_only(*worker.ioctx(), *image, name.image.c_str(),
+				name.snap.c_str(), &io->completion());
   } else {
-    r = rbd->open(*worker.ioctx(), *image, name.image.c_str(), name.snap.c_str());
+    r = rbd->aio_open(*worker.ioctx(), *image, name.image.c_str(),
+		      name.snap.c_str(), &io->completion());
   }
   if (r) {
     cerr << "Unable to open image '" << m_action.name
@@ -205,13 +207,20 @@ void AioOpenImageAction::perform(ActionCtx &worker) {
 	 << ": (" << -r << ") " << strerror(-r) << std::endl;
     exit(1);
   }
-  worker.put_image(m_action.imagectx_id, image);
-  worker.remove_pending(io);
+  worker.put_image(m_action.imagectx_id, image, io);
 }
 
 void AioCloseImageAction::perform(ActionCtx &worker) {
   dout(ACTION_LEVEL) << "Performing " << *this << dendl;
-  // TODO: Make it async
+  librbd::Image *image = worker.get_image(m_action.imagectx_id);
+  PendingIO::ptr io(new PendingIO(pending_io_id(), worker));
+  worker.add_pending(io);
+  int r = image->aio_close(&io->completion());
+  if (r < 0) {
+    worker.remove_pending(io);
+    return;
+  }
+  assertf(r == 0, "id = %d, r = %d", id(), r);
+  io->completion().wait_for_complete(); // XXXMG: erase should be run only after close complete
   worker.erase_image(m_action.imagectx_id);
-  worker.set_action_complete(pending_io_id());
 }

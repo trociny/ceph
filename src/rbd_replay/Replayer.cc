@@ -123,12 +123,29 @@ void Worker::remove_pending(PendingIO::ptr io) {
 
 
 librbd::Image* Worker::get_image(imagectx_id_t imagectx_id) {
+  PendingIO::ptr io;
+  {
+    boost::mutex::scoped_lock lock(m_pending_ios_mutex);
+    if (m_pending_images.count(imagectx_id) != 0) {
+      io = m_pending_images[imagectx_id];
+      m_pending_images.erase(imagectx_id);
+    }
+  }
+  if (io) {
+    io->completion().wait_for_complete();
+  }
   return m_replayer.get_image(imagectx_id);
 }
 
 
-void Worker::put_image(imagectx_id_t imagectx_id, librbd::Image* image) {
+void Worker::put_image(imagectx_id_t imagectx_id, librbd::Image* image,
+		       PendingIO::ptr io) {
   assert(image);
+  if (io) {
+    boost::mutex::scoped_lock lock(m_pending_ios_mutex);
+    assert(m_pending_images.count(imagectx_id) == 0);
+    m_pending_images[imagectx_id] = io;
+  }
   m_replayer.put_image(imagectx_id, image);
 }
 
@@ -270,7 +287,6 @@ void Replayer::run(const std::string& replay_file) {
  out:
   ;
 }
-
 
 librbd::Image* Replayer::get_image(imagectx_id_t imagectx_id) {
   boost::shared_lock<boost::shared_mutex> lock(m_images_mutex);

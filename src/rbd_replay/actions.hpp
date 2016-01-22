@@ -54,7 +54,8 @@ public:
      put_image(imagectx_id_t,librbd::Image*) must not have been called previously with the same ID,
      and the image must not be NULL.
    */
-  virtual void put_image(imagectx_id_t imagectx_id, librbd::Image* image) = 0;
+  virtual void put_image(imagectx_id_t imagectx_id, librbd::Image* image,
+			 boost::shared_ptr<PendingIO> io = nullptr) = 0;
 
   /**
      Stops tracking an Image and release it.

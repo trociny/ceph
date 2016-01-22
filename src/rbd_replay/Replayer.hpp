@@ -48,7 +48,8 @@ public:
 
   librbd::Image* get_image(imagectx_id_t imagectx_id);
 
-  void put_image(imagectx_id_t imagectx_id, librbd::Image* image);
+  void put_image(imagectx_id_t imagectx_id, librbd::Image* image,
+		 PendingIO::ptr io = nullptr);
 
   void erase_image(imagectx_id_t imagectx_id);
 
@@ -69,6 +70,7 @@ private:
   BoundedBuffer<Action::ptr> m_buffer;
   boost::shared_ptr<boost::thread> m_thread;
   std::map<action_id_t, PendingIO::ptr> m_pending_ios;
+  std::map<imagectx_id_t, PendingIO::ptr> m_pending_images;
   boost::mutex m_pending_ios_mutex;
   boost::condition m_pending_ios_empty;
   bool m_done;
