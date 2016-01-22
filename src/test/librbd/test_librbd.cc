@@ -340,6 +340,53 @@ TEST_F(TestLibRBD, OpenAioFail)
   rados_ioctx_destroy(ioctx);
 }
 
+TEST_F(TestLibRBD, OpenAioMany)
+{
+  rados_ioctx_t ioctx;
+  ASSERT_EQ(0, rados_ioctx_create(_cluster, m_pool_name.c_str(), &ioctx));
+
+  const unsigned N = 10;
+  rbd_image_t image[N];
+  std::string name[N];
+  rbd_completion_t comp[N];
+  int order = 0;
+  uint64_t size = 2 << 20;
+
+  //
+  for (unsigned i = 0; i < N; i++) {
+    name[i] = get_temp_image_name();
+    ASSERT_EQ(0, create_image(ioctx, name[i].c_str(), size, &order));
+  }
+
+  for (unsigned i = 0; i < N; i++) {
+    ASSERT_EQ(0, rbd_aio_create_completion(NULL, NULL, &comp[i]));
+    ASSERT_EQ(0, rbd_aio_open(ioctx, name[i].c_str(), &image[i], NULL, comp[i]));
+  }
+
+  for (unsigned i = 0; i < N; i++) {
+    ASSERT_EQ(0, rbd_aio_wait_for_complete(comp[i]));
+    ASSERT_EQ(1, rbd_aio_is_complete(comp[i]));
+    ASSERT_EQ(0, rbd_aio_get_return_value(comp[i]));
+    rbd_aio_release(comp[i]);
+
+    rbd_image_info_t info;
+    ASSERT_EQ(0, rbd_stat(image[i], &info, sizeof(info)));
+    printf("image has size %llu and order %d\n", (unsigned long long) info.size, info.order);
+
+    ASSERT_EQ(0, rbd_aio_create_completion(NULL, NULL, &comp[i]));
+    ASSERT_EQ(0, rbd_aio_close(image[i], comp[i]));
+  }
+
+  for (unsigned i = 0; i < N; i++) {
+    ASSERT_EQ(0, rbd_aio_wait_for_complete(comp[i]));
+    ASSERT_EQ(1, rbd_aio_is_complete(comp[i]));
+    ASSERT_EQ(0, rbd_aio_get_return_value(comp[i]));
+    rbd_aio_release(comp[i]);
+  }
+
+  rados_ioctx_destroy(ioctx);
+}
+
 TEST_F(TestLibRBD, OpenAioPP)
 {
   librados::IoCtx ioctx;
