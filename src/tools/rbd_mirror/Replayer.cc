@@ -109,7 +109,8 @@ void Replayer::set_sources(const map<int64_t, set<string> > &images)
       if (pool_replayers.find(image_name) == pool_replayers.end()) {
 	unique_ptr<ImageReplayer> image_replayer(new ImageReplayer(m_primary,
 								   m_remote,
-								   pool_id,
+								   "pool_id",
+								   "XXXGM",
 								   image_name));
 	int r = image_replayer->start();
 	if (r < 0) {

@@ -13,6 +13,20 @@
 #include "include/rbd/librbd.hpp"
 #include "types.h"
 
+namespace journal {
+
+class Journaler;
+class ReplayHandler;
+
+}
+
+namespace librbd {
+
+class ImageCtx;
+class JournalReplay;
+
+}
+
 namespace rbd {
 namespace mirror {
 
@@ -21,8 +35,9 @@ namespace mirror {
  */
 class ImageReplayer {
 public:
-  ImageReplayer(RadosRef primary, RadosRef remote,
-		int64_t primary_pool_id, const string &image_name);
+  ImageReplayer(RadosRef local, RadosRef remote, const string &local_pool_name,
+		const string &remote_pool_name, const string &local_image_name,
+		const string &remote_image_name = "");
   ~ImageReplayer();
   ImageReplayer(const ImageReplayer&) = delete;
   ImageReplayer& operator=(const ImageReplayer&) = delete;
@@ -30,14 +45,20 @@ public:
   int start();
   void stop();
 
+  void handle_replay_ready();
+  void handle_replay_complete(int r);
+
 private:
+  RadosRef m_local, m_remote;
+  std::string m_local_pool_name, m_remote_pool_name;
+  std::string m_local_image_name, m_remote_image_name;
   Mutex m_lock;
-  int64_t m_pool_id;
-  std::string m_pool_name;
-  std::string m_image_name;
-  RadosRef m_primary, m_remote;
-  librados::IoCtx m_primary_ioctx, m_remote_ioctx;
-  librbd::Image m_remote_image;
+  librados::IoCtx m_local_ioctx, m_remote_ioctx;
+  librbd::ImageCtx *m_local_image_ctx;
+  librbd::JournalReplay *m_journal_replay;
+  ::journal::Journaler *m_remote_journaler;
+  ::journal::ReplayHandler *m_replay_handler;
+  uint64_t last_commit_tid;
 };
 
 } // namespace mirror

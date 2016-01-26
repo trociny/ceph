@@ -87,8 +87,24 @@ rbd_mirror_SOURCES = \
 	tools/rbd_mirror/PoolWatcher.cc \
 	tools/rbd_mirror/Replayer.cc \
 	tools/rbd_mirror/types.cc
-rbd_mirror_LDADD = $(LIBRBD) $(LIBRADOS) $(CEPH_GLOBAL)
+rbd_mirror_LDADD = \
+	librbd_internal.la librbd_api.la \
+	libcls_rbd_client.la libcls_lock_client.la \
+	libjournal.la libcls_journal_client.la \
+	librados_internal.la \
+	$(LIBRBD_TYPES)	$(LIBRADOS) $(LIBOSDC) $(CEPH_GLOBAL)
 bin_PROGRAMS += rbd-mirror
+
+rbd_image_replay_SOURCES = \
+	tools/rbd_mirror/rbd-image-replay.cc \
+	tools/rbd_mirror/ImageReplayer.cc
+rbd_image_replay_LDADD = \
+	librbd_internal.la librbd_api.la \
+	libcls_rbd_client.la libcls_lock_client.la \
+	libjournal.la libcls_journal_client.la \
+	librados_internal.la \
+	$(LIBRBD_TYPES)	$(LIBRADOS) $(LIBOSDC) $(CEPH_GLOBAL)
+bin_PROGRAMS += rbd-image-replay
 
 endif # WITH_RBD
 
