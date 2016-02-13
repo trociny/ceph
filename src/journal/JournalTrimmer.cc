@@ -43,7 +43,8 @@ int JournalTrimmer::remove_objects(bool force) {
 
     if (!force) {
       JournalMetadata::RegisteredClients registered_clients;
-      m_journal_metadata->get_registered_clients(&registered_clients);
+      int r = m_journal_metadata->get_registered_clients(&registered_clients);
+      assert(r == 0);
 
       if (registered_clients.size() == 0) {
 	return -EINVAL;
@@ -132,7 +133,8 @@ void JournalTrimmer::handle_commit_position_safe(
     uint64_t object_set = object_set_position.object_number / splay_width;
 
     JournalMetadata::RegisteredClients registered_clients;
-    m_journal_metadata->get_registered_clients(&registered_clients);
+    r = m_journal_metadata->get_registered_clients(&registered_clients);
+    assert(r == 0);
 
     bool trim_permitted = true;
     for (JournalMetadata::RegisteredClients::iterator it =

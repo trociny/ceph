@@ -29,6 +29,7 @@ class ReplayHandler;
 class Journaler {
 public:
   typedef std::list<cls::journal::Tag> Tags;
+  typedef std::set<cls::journal::Client> RegisteredClients;
 
   static std::string header_oid(const std::string &journal_id);
   static std::string object_oid_prefix(int pool_id,
@@ -47,6 +48,7 @@ public:
 
   int register_client(const bufferlist &data);
   int unregister_client();
+  int get_registered_clients(RegisteredClients *registered_clients);
 
   void flush_commit_position(Context *on_safe);
 

@@ -171,6 +171,10 @@ int Journaler::unregister_client() {
   return m_metadata->unregister_client();
 }
 
+int Journaler::get_registered_clients(RegisteredClients *registered_clients) {
+  return m_metadata->get_registered_clients(registered_clients);
+}
+
 void Journaler::allocate_tag(const bufferlist &data, cls::journal::Tag *tag,
                              Context *on_finish) {
   m_metadata->allocate_tag(cls::journal::Tag::TAG_CLASS_NEW, data, tag,

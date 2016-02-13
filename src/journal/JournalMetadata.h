@@ -107,10 +107,7 @@ public:
     *commit_position = m_client.commit_position;
   }
 
-  void get_registered_clients(RegisteredClients *registered_clients) {
-    Mutex::Locker locker(m_lock);
-    *registered_clients = m_registered_clients;
-  }
+  int get_registered_clients(RegisteredClients *registered_clients);
 
   inline uint64_t allocate_entry_tid(uint64_t tag_tid) {
     Mutex::Locker locker(m_lock);

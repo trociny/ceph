@@ -506,6 +506,31 @@ void JournalMetadata::set_commit_position(
   }
 }
 
+int JournalMetadata::get_registered_clients(RegisteredClients
+					    *registered_clients) {
+  uint64_t minimum_set;
+  uint64_t active_set;
+  C_SaferCond cond;
+
+  {
+    Mutex::Locker locker(m_lock);
+    if (m_initialized) {
+      *registered_clients = m_registered_clients;
+      return 0;
+    }
+
+    client::get_mutable_metadata(m_ioctx, m_oid, &minimum_set, &active_set,
+				 registered_clients, &cond);
+  }
+
+  int r = cond.wait();
+  if (r < 0) {
+    lderr(m_cct) << "failed to retrieve mutable metadata: " << cpp_strerror(r)
+		 << dendl;
+  }
+  return r;
+}
+
 void JournalMetadata::reserve_entry_tid(uint64_t tag_tid, uint64_t entry_tid) {
   Mutex::Locker locker(m_lock);
   uint64_t &allocated_entry_tid = m_allocated_entry_tids[tag_tid];
