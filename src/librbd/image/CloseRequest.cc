@@ -84,8 +84,8 @@ void CloseRequest<I>::send_shut_down_exclusive_lock() {
   {
     RWLock::WLocker owner_locker(m_image_ctx->owner_lock);
     RWLock::WLocker snap_locker(m_image_ctx->snap_lock);
-    std::swap(m_exclusive_lock, m_image_ctx->exclusive_lock);
 
+    m_exclusive_lock = m_image_ctx->exclusive_lock;
     if (m_exclusive_lock == nullptr) {
       delete m_image_ctx->object_map;
       m_image_ctx->object_map = nullptr;
@@ -108,6 +108,12 @@ template <typename I>
 void CloseRequest<I>::handle_shut_down_exclusive_lock(int r) {
   CephContext *cct = m_image_ctx->cct;
   ldout(cct, 10) << this << " " << __func__ << ": r=" << r << dendl;
+
+  {
+    RWLock::WLocker owner_locker(m_image_ctx->owner_lock);
+    RWLock::WLocker snap_locker(m_image_ctx->snap_lock);
+    m_image_ctx->exclusive_lock = nullptr;
+  }
 
   // object map and journal closed during exclusive lock shutdown
   assert(m_image_ctx->journal == nullptr);

@@ -185,6 +185,18 @@ private:
     }
   };
 
+  struct RefreshPayloadVisitor : public boost::static_visitor<bool> {
+    template <typename Payload>
+    inline bool operator()(const Payload &payload) const {
+      return true;
+    }
+
+    inline bool operator()(const watch_notify::HeaderUpdatePayload &) const {
+      // don't force a refresh on a header update notification
+      return false;
+    }
+  };
+
   struct HandlePayloadVisitor : public boost::static_visitor<void> {
     ImageWatcher *image_watcher;
     uint64_t notify_id;
