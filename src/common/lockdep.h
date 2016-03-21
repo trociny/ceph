@@ -15,9 +15,13 @@
 #ifndef CEPH_LOCKDEP_H
 #define CEPH_LOCKDEP_H
 
-class CephContext;
+#include <pthread.h>
 
-extern int g_lockdep;
+class CephContext;
+struct LockdepContext;
+
+extern LockdepContext *g_lockdep;
+extern pthread_mutex_t g_lockdep_mutex;
 
 extern void lockdep_register_ceph_context(CephContext *cct);
 extern void lockdep_unregister_ceph_context(CephContext *cct);
