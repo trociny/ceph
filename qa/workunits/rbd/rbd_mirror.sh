@@ -16,7 +16,7 @@
 #                         (should not exist) instead of running mktemp(1).
 #
 # The cleanup can be done as a separate step, running the script with
-# `cleanup ${RBD_MIRROR_TEMDIR}' arguments.
+# `cleanup' argument and RBD_MIRROR_TEMDIR env variable defined.
 #
 # Note, as other workunits tests, rbd_mirror.sh expects to find ceph binaries
 # in PATH.
@@ -43,10 +43,20 @@
 #   ceph --admin-daemon rbd-mirror.asok help
 #   ...
 #
+# Also you can execute commands (functions) from the script:
+#
+#   cd $CEPH_SRC_PATH
+#   expor RBD_MIRROR_TEMDIR=/tmp/tmp.rbd_mirror
+#   ../qa/workunits/rbd/rbd_mirror.sh status
+#   ../qa/workunits/rbd/rbd_mirror.sh stop_mirror
+#   ../qa/workunits/rbd/rbd_mirror.sh start_mirror
+#   ../qa/workunits/rbd/rbd_mirror.sh flush
+#   ...
+#
 # Eventually, run the cleanup:
 #
 #   cd $CEPH_SRC_PATH
-#   ../qa/workunits/rbd/rbd_mirror.sh cleanup /tmp/tmp.rbd_mirror
+#   RBD_MIRROR_TEMDIR=/tmp/tmp.rbd_mirror ../qa/workunits/rbd/rbd_mirror.sh cleanup
 #
 
 LOC_CLUSTER=local
@@ -113,11 +123,23 @@ cleanup()
     rm -Rf ${TEMPDIR}
 }
 
-start_mirror()
+set_rbd_mirror_env()
 {
     RBD_MIRROR_PID_FILE=${TEMPDIR}/rbd-mirror.pid
     RBD_MIRROR_LOC_ASOK=${TEMPDIR}/rbd-mirror.${LOC_CLUSTER}.asok
     RBD_MIRROR_RMT_ASOK=${TEMPDIR}/rbd-mirror.${RMT_CLUSTER}.asok
+}
+
+unset_rbd_mirror_env()
+{
+    RBD_MIRROR_PID_FILE=
+    RBD_MIRROR_LOC_ASOK=
+    RBD_MIRROR_RMT_ASOK=
+}
+
+start_mirror()
+{
+    set_rbd_mirror_env
 
     rbd-mirror \
 	--cluster ${LOC_CLUSTER} \
@@ -148,20 +170,96 @@ stop_mirror()
 	ps auxww | awk -v pid=${pid} '$2 == pid {print; exit 1}'
     fi
     rm -f ${RBD_MIRROR_LOC_ASOK} ${RBD_MIRROR_RMT_ASOK} ${RBD_MIRROR_PID_FILE}
-    RBD_MIRROR_PID_FILE=
-    RBD_MIRROR_LOC_ASOK=
-    RBD_MIRROR_RMT_ASOK=
+
+    unset_rbd_mirror_env
+}
+
+status()
+{
+    local image
+
+    echo "${LOC_CLUSTER} status"
+    ceph --cluster ${LOC_CLUSTER} -s
+    echo
+
+    echo "${LOC_CLUSTER} ${POOL} images"
+    rbd --cluster ${RMT_CLUSTER} -p ${POOL} ls
+    echo
+
+    for image in `rbd --cluster ${LOC_CLUSTER} -p ${POOL} ls 2>/dev/null`
+    do
+	echo "image ${image} journal status"
+	rbd --cluster ${LOC_CLUSTER} -p ${POOL} journal status --image ${image}
+	echo
+    done
+
+    echo "${RMT_CLUSTER} status"
+    ceph --cluster ${RMT_CLUSTER} -s
+    echo
+
+    echo "${RMT_CLUSTER} ${POOL} images"
+    rbd --cluster ${RMT_CLUSTER} -p ${POOL} ls
+    echo
+
+    echo "${RMT_CLUSTER} ${POOL} images"
+    rbd --cluster ${RMT_CLUSTER} -p ${POOL} ls
+    echo
+
+    for image in `rbd --cluster ${RMT_CLUSTER} -p ${POOL} ls 2>/dev/null`
+    do
+	echo "image ${image} journal status"
+	rbd --cluster ${RMT_CLUSTER} -p ${POOL} journal status --image ${image}
+	echo
+    done
+
+    if [ -z "${RBD_MIRROR_PID_FILE}" ]
+    then
+	echo "rbd-mirror not running or unknown (empty RBD_MIRROR_PID_FILE)"
+	return 0
+    fi
+
+    local pid
+    pid=$(cat ${RBD_MIRROR_PID_FILE} 2>/dev/null) || :
+    if [ -z "${pid}" ]
+    then
+	echo "rbd-mirror not running or unknown" \
+	     "(can't find pid using ${RBD_MIRROR_PID_FILE})"
+	return 1
+    fi
+
+    echo "rbd-mirror process in ps output:"
+    if ps auxww | awk -v pid=${pid} 'NR == 1 {print} $2 == pid {print; exit 1}'
+    then
+	echo
+	echo "rbd-mirror not running (can't find pid $pid in ps output)"
+	return 1
+    fi
+    echo
+
+    if [ -z "${RBD_MIRROR_LOC_ASOK}" ]
+    then
+	echo "rbd-mirror asok is unknown (RBD_MIRROR_LOC_ASOK is empty)"
+	return 1
+    fi
+
+    echo "rbd-mirror status"
+    ceph --admin-daemon ${RBD_MIRROR_LOC_ASOK} rbd mirror status
+    echo
 }
 
 flush()
 {
     local image=$1
-    local image_id cmd
+    local cmd="rbd mirror flush"
+
+    if [ -n "${image}" ]
+    then
+	cmd="${cmd} ${POOL}/${image}"
+    fi
 
     test -n "${RBD_MIRROR_LOC_ASOK}"
 
-    ceph --admin-daemon ${RBD_MIRROR_LOC_ASOK} \
-	 rbd mirror flush ${POOL}/${image}
+    ceph --admin-daemon ${RBD_MIRROR_LOC_ASOK} ${cmd}
 }
 
 test_image_replay_state()
@@ -210,14 +308,21 @@ get_position()
     local image=$1
     local id_regexp=$2
 
-    # Parse line like below, looking for the first position
+    # Parse line like below, looking for the first entry_tid
     # [id=, commit_position=[positions=[[object_number=1, tag_tid=3, entry_tid=9], [object_number=0, tag_tid=3, entry_tid=8], [object_number=3, tag_tid=3, entry_tid=7], [object_number=2, tag_tid=3, entry_tid=6]]]]
 
     local status_log=${TEMPDIR}/${RMT_CLUSTER}-${POOL}-${image}.status
     rbd --cluster ${RMT_CLUSTER} -p ${POOL} journal status --image ${image} |
 	tee ${status_log} >&2
-    sed -nEe 's/^.*\[id='"${id_regexp}"',.*positions=\[\[([^]]*)\],.*$/\1/p' \
-	${status_log}
+    sed -Ee 's/[][,]/ /g' ${status_log} |
+	awk '$1 ~ /id='"${id_regexp}"'$/ {
+               for (i = 1; i < NF; i++) {
+                 if ($i ~ /entry_tid=/) {
+                   print $i;
+                   exit
+                 }
+               }
+             }'
 }
 
 get_master_position()
@@ -299,20 +404,19 @@ compare_images()
 # Main
 #
 
-if [ "$1" = clean ]; then
-    TEMPDIR=$2
-
-    if [ -z "${TEMPDIR}" -a -n "${RBD_MIRROR_TEMDIR}" ]; then
-	TEMPDIR="${RBD_MIRROR_TEMDIR}"
+if [ "$#" -gt 0 ]
+then
+    if [ -z "${RBD_MIRROR_TEMDIR}" ]
+    then
+	echo "RBD_MIRROR_TEMDIR is not set" >&2
+	exit 1
     fi
 
-    test -n "${TEMPDIR}"
-
-    RBD_MIRROR_PID_FILE=${TEMPDIR}/rbd-mirror.pid
-    RBD_MIRROR_NOCLEANUP=
-
-    cleanup
-    exit
+    TEMPDIR="${RBD_MIRROR_TEMDIR}"
+    set_rbd_mirror_env
+    cd ${TEMPDIR}
+    $@
+    exit $?
 fi
 
 set -xe
