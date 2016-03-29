@@ -250,6 +250,10 @@ void ImageReplayer::start(Context *on_finish,
 						m_remote_image_id, m_client_id,
 						commit_interval);
 
+  cls::rbd::MirrorImageStatus
+    status(cls::rbd::MIRROR_IMAGE_STATUS_STATE_STARTING_REPLAY);
+  mirror_image_status_set(status);
+
   on_start_get_registered_client_status_start(bootstrap_params);
 }
 
@@ -350,6 +354,10 @@ void ImageReplayer::bootstrap(const BootstrapParams &bootstrap_params) {
            << "local_pool_name=" << params.local_pool_name << ", "
 	   << "local_image_name=" << params.local_image_name << dendl;
 
+  cls::rbd::MirrorImageStatus
+    status(cls::rbd::MIRROR_IMAGE_STATUS_STATE_SYNCING);
+  mirror_image_status_set(status);
+
   // TODO: add a new bootstrap state and support canceling
   Context *ctx = create_context_callback<
     ImageReplayer, &ImageReplayer::handle_bootstrap>(this);
@@ -371,6 +379,10 @@ void ImageReplayer::handle_bootstrap(int r) {
   if (on_start_interrupted()) {
     return;
   }
+
+  cls::rbd::MirrorImageStatus
+    status(cls::rbd::MIRROR_IMAGE_STATUS_STATE_STARTING_REPLAY);
+  mirror_image_status_set(status);
 
   on_start_remote_journaler_init_start();
 }
@@ -511,6 +523,10 @@ void ImageReplayer::on_start_wait_for_local_journal_ready_finish(int r)
     std::swap(m_on_finish, on_finish);
   }
 
+  cls::rbd::MirrorImageStatus
+    status(cls::rbd::MIRROR_IMAGE_STATUS_STATE_REPLAYING);
+  mirror_image_status_set(status);
+
   dout(20) << "start succeeded" << dendl;
 
   if (on_finish) {
@@ -528,6 +544,11 @@ void ImageReplayer::on_start_fail_start(int r)
       assert(r1 == 0);
       on_start_fail_finish(r);
     });
+
+  cls::rbd::MirrorImageStatus
+    status(cls::rbd::MIRROR_IMAGE_STATUS_STATE_ERROR);
+  status.error = "start failed"; // XXXMG
+  mirror_image_status_set(status);
 
   m_threads->work_queue->queue(ctx, 0);
 }
@@ -647,6 +668,11 @@ void ImageReplayer::stop(Context *on_finish)
     m_on_finish = on_finish;
     on_stop_journal_replay_shut_down_start();
   }
+
+  cls::rbd::MirrorImageStatus
+    status(cls::rbd::MIRROR_IMAGE_STATUS_STATE_STOPPING_REPLAY);
+  mirror_image_status_set(status);
+
   m_state = STATE_STOPPING;
 }
 
@@ -718,6 +744,10 @@ void ImageReplayer::on_stop_local_image_close_finish(int r)
 
     std::swap(m_on_finish, on_finish);
   }
+
+  cls::rbd::MirrorImageStatus
+    status(cls::rbd::MIRROR_IMAGE_STATUS_STATE_STOPPED);
+  mirror_image_status_set(status);
 
   dout(20) << "stop complete" << dendl;
 
@@ -946,6 +976,27 @@ void ImageReplayer::shut_down_journal_replay(bool cancel_ops)
   if (r < 0) {
     derr << "error flushing journal replay: " << cpp_strerror(r) << dendl;
   }
+}
+
+void ImageReplayer::mirror_image_status_set(
+  const cls::rbd::MirrorImageStatus &status)
+{
+  dout(20) << "status=" << status << dendl;
+
+  // XXXMG
+  if (!m_local_image_ctx) {
+    dout(0) << "XXXMG: m_local_image_ctx is not set, returning" << dendl;
+    return;
+  }
+
+  librados::ObjectWriteOperation op;
+  librbd::cls_client::mirror_image_status_set(&op, m_local_image_ctx->id,
+					      status);
+  librados::AioCompletion *comp = librados::Rados::aio_create_completion();
+
+  int r = m_local_ioctx.aio_operate(RBD_MIRRORING_STATUS, comp, &op);
+  assert(r == 0);
+  comp->release();
 }
 
 std::ostream &operator<<(std::ostream &os, const ImageReplayer::State &state)

@@ -124,6 +124,11 @@ cls_method_handle_t h_mirror_image_list;
 cls_method_handle_t h_mirror_image_get;
 cls_method_handle_t h_mirror_image_set;
 cls_method_handle_t h_mirror_image_remove;
+cls_method_handle_t h_mirror_image_status_init;
+cls_method_handle_t h_mirror_image_status_list;
+cls_method_handle_t h_mirror_image_status_get;
+cls_method_handle_t h_mirror_image_status_set;
+cls_method_handle_t h_mirror_image_status_remove;
 
 #define RBD_MAX_KEYS_READ 64
 #define RBD_SNAP_KEY_PREFIX "snapshot_"
@@ -2960,6 +2965,7 @@ static const std::string UUID("mirror_uuid");
 static const std::string MODE("mirror_mode");
 static const std::string PEER_KEY_PREFIX("mirror_peer_");
 static const std::string IMAGE_KEY_PREFIX("image_");
+static const std::string INSTANCE_ID("instance_id");
 
 std::string peer_key(const std::string &uuid) {
   return PEER_KEY_PREFIX + uuid;
@@ -3140,6 +3146,117 @@ int image_remove(cls_method_context_t hctx, const string &image_id) {
   if (r < 0) {
     CLS_ERR("error removing mirrored image '%s': %s", image_id.c_str(),
             cpp_strerror(r).c_str());
+    return r;
+  }
+  return 0;
+}
+
+int image_status_init(cls_method_context_t hctx, uint64_t instance_id) {
+  int r = cls_cxx_map_clear(hctx);
+  if (r == -ENOENT) {
+    r = 0;
+  }
+  if (r < 0) {
+    CLS_ERR("error crearing status for mirrored images: %s",
+	    cpp_strerror(r).c_str());
+    return r;
+  }
+
+  bufferlist bl;
+  ::encode(instance_id, bl);
+  r = cls_cxx_map_set_val(hctx, mirror::INSTANCE_ID, &bl);
+  if (r < 0) {
+    CLS_ERR("error registering instance_id %llu: %s",
+	    (unsigned long long)instance_id, cpp_strerror(r).c_str());
+    return r;
+  }
+  return 0;
+}
+
+int image_status_list_ids(cls_method_context_t hctx, vector<string> *image_ids) {
+  string last_read = IMAGE_KEY_PREFIX;
+  int max_read = RBD_MAX_KEYS_READ;
+  int r = max_read;
+  while (r == max_read) {
+    set<string> keys;
+    r = cls_cxx_map_get_keys(hctx, last_read, max_read, &keys);
+    if (r < 0) {
+      CLS_ERR("error reading mirrored images: %s", cpp_strerror(r).c_str());
+      return r;
+    }
+
+    for (auto &image_key : keys) {
+      if (0 != image_key.compare(0, IMAGE_KEY_PREFIX.size(), IMAGE_KEY_PREFIX)) {
+	return 0;
+      }
+      image_ids->push_back(image_key.substr(IMAGE_KEY_PREFIX.size()));
+    }
+  }
+  return 0;
+}
+
+int image_status_get(cls_method_context_t hctx, const string &image_id,
+		     uint64_t *instance_id,
+		     cls::rbd::MirrorImageStatus *status) {
+  bufferlist bl;
+  int r = cls_cxx_map_get_val(hctx, mirror::INSTANCE_ID, &bl);
+  if (r < 0) {
+    if (r != -ENOENT) {
+      CLS_ERR("error reading instance_id: '%s'", cpp_strerror(r).c_str());
+    }
+    return r;
+  }
+
+  try {
+    bufferlist::iterator it = bl.begin();
+    ::decode(*instance_id, it);
+  } catch (const buffer::error &err) {
+    CLS_ERR("could not decode instance_id");
+    return -EIO;
+  }
+
+  bl.clear();
+  r = cls_cxx_map_get_val(hctx, image_key(image_id), &bl);
+  if (r < 0) {
+    if (r != -ENOENT) {
+      CLS_ERR("error reading status for mirrored image '%s': '%s'",
+	      image_id.c_str(), cpp_strerror(r).c_str());
+    }
+    return r;
+  }
+
+  try {
+    bufferlist::iterator it = bl.begin();
+    ::decode(*status, it);
+  } catch (const buffer::error &err) {
+    CLS_ERR("could not decode status for mirrored image '%s'",
+	    image_id.c_str());
+    return -EIO;
+  }
+
+  return 0;
+}
+
+int image_status_set(cls_method_context_t hctx, const string &image_id,
+		     const cls::rbd::MirrorImageStatus &status) {
+  bufferlist bl;
+  ::encode(status, bl);
+
+  int r = cls_cxx_map_set_val(hctx, image_key(image_id), &bl);
+  if (r < 0) {
+    CLS_ERR("error setting status for mirrored image '%s': %s",
+	    image_id.c_str(), cpp_strerror(r).c_str());
+    return r;
+  }
+  return 0;
+}
+
+int image_status_remove(cls_method_context_t hctx, const string &image_id) {
+
+  int r = cls_cxx_map_remove_key(hctx, image_key(image_id));
+  if (r < 0) {
+    CLS_ERR("error removing status for mirrored image '%s': %s",
+	    image_id.c_str(), cpp_strerror(r).c_str());
     return r;
   }
   return 0;
@@ -3584,6 +3701,131 @@ int mirror_image_remove(cls_method_context_t hctx, bufferlist *in,
   return 0;
 }
 
+/**
+ * Input:
+ * @param client_id (std::string)
+ *
+ * Output:
+ * @returns 0 on success, negative error code on failure
+ */
+int mirror_image_status_init(cls_method_context_t hctx, bufferlist *in,
+			     bufferlist *out) {
+  uint64_t instance_id;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(instance_id, it);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  int r = mirror::image_status_init(hctx, instance_id);
+  if (r < 0) {
+    return r;
+  }
+  return 0;
+}
+
+/**
+ * Input:
+ * none
+ *
+ * Output:
+ * @param std::vector<std::string>: collection of image_ids
+ * @returns 0 on success, negative error code on failure
+ */
+int mirror_image_status_list(cls_method_context_t hctx, bufferlist *in,
+			     bufferlist *out) {
+  vector<string> image_ids;
+  int r = mirror::image_status_list_ids(hctx, &image_ids);
+  if (r < 0) {
+    return r;
+  }
+
+  ::encode(image_ids, *out);
+  return 0;
+}
+
+/**
+ * Input:
+ * @param image_id (std::string)
+ *
+ * Output:
+ * @param cls::rbd::MirrorImageStatus - metadata associated with the image_id
+ * @returns 0 on success, negative error code on failure
+ */
+int mirror_image_status_get(cls_method_context_t hctx, bufferlist *in,
+			    bufferlist *out) {
+  string image_id;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(image_id, it);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  uint64_t instance_id;
+  cls::rbd::MirrorImageStatus status;
+  int r = mirror::image_status_get(hctx, image_id, &instance_id, &status);
+  if (r < 0) {
+    return r;
+  }
+
+  ::encode(instance_id, *out);
+  ::encode(status, *out);
+  return 0;
+}
+
+/**
+ * Input:
+ * @param image_id (std::string)
+ * @param status (cls::rbd::MirrorImageStatus)
+ *
+ * Output:
+ * @returns 0 on success, negative error code on failure
+ */
+int mirror_image_status_set(cls_method_context_t hctx, bufferlist *in,
+			    bufferlist *out) {
+  string image_id;
+  cls::rbd::MirrorImageStatus status;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(image_id, it);
+    ::decode(status, it);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  int r = mirror::image_status_set(hctx, image_id, status);
+  if (r < 0) {
+    return r;
+  }
+  return 0;
+}
+
+/**
+ * Input:
+ * @param image_id (std::string)
+ *
+ * Output:
+ * @returns 0 on success, negative error code on failure
+ */
+int mirror_image_status_remove(cls_method_context_t hctx, bufferlist *in,
+			       bufferlist *out) {
+  string image_id;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(image_id, it);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  int r = mirror::image_status_remove(hctx, image_id);
+  if (r < 0) {
+    return r;
+  }
+  return 0;
+}
+
 void __cls_init()
 {
   CLS_LOG(20, "Loaded rbd class!");
@@ -3776,5 +4018,21 @@ void __cls_init()
   cls_register_cxx_method(h_class, "mirror_image_remove",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           mirror_image_remove, &h_mirror_image_remove);
+  cls_register_cxx_method(h_class, "mirror_image_status_init",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+                          mirror_image_status_init,
+			  &h_mirror_image_status_init);
+  cls_register_cxx_method(h_class, "mirror_image_status_list", CLS_METHOD_RD,
+                          mirror_image_status_list,
+			  &h_mirror_image_status_list);
+  cls_register_cxx_method(h_class, "mirror_image_status_get", CLS_METHOD_RD,
+                          mirror_image_status_get, &h_mirror_image_status_get);
+  cls_register_cxx_method(h_class, "mirror_image_status_set",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          mirror_image_status_set, &h_mirror_image_status_set);
+  cls_register_cxx_method(h_class, "mirror_image_status_remove",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          mirror_image_status_remove,
+			  &h_mirror_image_status_remove);
   return;
 }

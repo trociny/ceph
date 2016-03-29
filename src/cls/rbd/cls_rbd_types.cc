@@ -127,5 +127,67 @@ std::ostream& operator<<(std::ostream& os, const MirrorImage& mirror_image) {
   return os;
 }
 
+void MirrorImageStatus::encode(bufferlist &bl) const {
+  ENCODE_START(1, 1, bl);
+  ::encode(static_cast<uint8_t>(state), bl);
+  ENCODE_FINISH(bl);
+}
+
+void MirrorImageStatus::decode(bufferlist::iterator &it) {
+  uint8_t int_state;
+  DECODE_START(1, it);
+  ::decode(int_state, it);
+  state = static_cast<MirrorImageStatusState>(int_state);
+  DECODE_FINISH(it);
+}
+
+void MirrorImageStatus::dump(Formatter *f) const {
+  f->dump_int("state", state);
+}
+
+void MirrorImageStatus::generate_test_instances(
+  std::list<MirrorImageStatus*> &o) {
+  o.push_back(new MirrorImageStatus());
+  o.push_back(new MirrorImageStatus(MIRROR_IMAGE_STATUS_STATE_REPLAYING));
+  o.push_back(new MirrorImageStatus(MIRROR_IMAGE_STATUS_STATE_ERROR));
+}
+
+bool MirrorImageStatus::operator==(const MirrorImageStatus &rhs) const {
+  return state == rhs.state && error == rhs.error;
+}
+
+std::ostream& operator<<(std::ostream& os, const MirrorImageStatusState& state) {
+  switch (state) {
+  case MIRROR_IMAGE_STATUS_STATE_ERROR:
+    os << "error";
+    break;
+  case MIRROR_IMAGE_STATUS_STATE_SYNCING:
+    os << "syncing";
+    break;
+  case MIRROR_IMAGE_STATUS_STATE_STARTING_REPLAY:
+    os << "starting_replay";
+    break;
+  case MIRROR_IMAGE_STATUS_STATE_REPLAYING:
+    os << "replaying";
+    break;
+  case MIRROR_IMAGE_STATUS_STATE_STOPPING_REPLAY:
+    os << "stopping_replay";
+    break;
+  case MIRROR_IMAGE_STATUS_STATE_STOPPED:
+    os << "stopped";
+    break;
+  default:
+    os << "unknown (" << static_cast<uint32_t>(state) << ")";
+    break;
+  }
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const MirrorImageStatus& status) {
+  os << "["
+     << "state=" << status.state << "]";
+  return os;
+}
+
 } // namespace rbd
 } // namespace cls

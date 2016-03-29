@@ -235,6 +235,33 @@ namespace librbd {
 			 const cls::rbd::MirrorImage &mirror_image);
     int mirror_image_remove(librados::IoCtx *ioctx,
 			    const std::string &image_id);
+    int mirror_image_status_init(librados::IoCtx *ioctx, uint64_t instance_id);
+    void mirror_image_status_init(librados::ObjectWriteOperation *op,
+				  uint64_t instance_id);
+    int mirror_image_status_list(librados::IoCtx *ioctx,
+				 std::vector<std::string> *image_ids);
+    void mirror_image_status_list_start(librados::ObjectReadOperation *op);
+    int mirror_image_status_list_finish(bufferlist::iterator *iter,
+					std::vector<std::string> *image_ids);
+    int mirror_image_status_get(librados::IoCtx *ioctx,
+				const std::string &image_id,
+				uint64_t *instance_id,
+				cls::rbd::MirrorImageStatus *status);
+    void mirror_image_status_get_start(librados::ObjectReadOperation *op,
+				const std::string &image_id);
+    int mirror_image_status_get_finish(bufferlist::iterator *iter,
+				       uint64_t *instance_id,
+				       cls::rbd::MirrorImageStatus *status);
+    int mirror_image_status_set(librados::IoCtx *ioctx,
+				const std::string &image_id,
+				const cls::rbd::MirrorImageStatus &status);
+    void mirror_image_status_set(librados::ObjectWriteOperation *op,
+				 const std::string &image_id,
+				 const cls::rbd::MirrorImageStatus &status);
+    int mirror_image_status_remove(librados::IoCtx *ioctx,
+				   const std::string &image_id);
+    void mirror_image_status_remove(librados::ObjectWriteOperation *op,
+				    const std::string &image_id);
 
   } // namespace cls_client
 } // namespace librbd

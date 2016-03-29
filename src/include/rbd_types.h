@@ -61,8 +61,10 @@
 /**
  * rbd_mirroring object in each pool contains pool-specific settings
  * for configuring mirroring.
+ * rbd_mirroing_status object contains curren mirroring status per image.
  */
-#define RBD_MIRRORING       "rbd_mirroring"
+#define RBD_MIRRORING		"rbd_mirroring"
+#define RBD_MIRRORING_STATUS	"rbd_mirroring_status"
 
 #define RBD_MAX_OBJ_NAME_SIZE	96
 #define RBD_MAX_BLOCK_NAME_SIZE 24

@@ -1,6 +1,8 @@
 // -*- mode:C; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
+#include "common/ceph_context.h"
+#include "common/config.h"
 #include "common/snap_types.h"
 #include "include/encoding.h"
 #include "include/types.h"
@@ -1416,6 +1418,76 @@ TEST_F(TestClsRbd, mirror_image) {
   ASSERT_EQ(0, mirror_image_remove(&ioctx, "image_id3"));
 
   ASSERT_EQ(0, mirror_image_list(&ioctx, &image_ids));
+  expected_image_ids = {};
+  ASSERT_EQ(expected_image_ids, image_ids);
+}
+
+TEST_F(TestClsRbd, mirror_image_status) {
+  librados::IoCtx ioctx;
+  ASSERT_EQ(0, _rados.ioctx_create(_pool_name.c_str(), ioctx));
+  ioctx.remove(RBD_MIRRORING_STATUS);
+
+  vector<string> image_ids;
+  ASSERT_EQ(-ENOENT, mirror_image_status_list(&ioctx, &image_ids));
+
+  uint64_t instance_id = _rados.get_instance_id();
+
+  ASSERT_EQ(0, mirror_image_status_init(&ioctx, instance_id));
+
+  ASSERT_EQ(0, mirror_image_status_list(&ioctx, &image_ids));
+  vector<string> expected_image_ids = {};
+  ASSERT_EQ(expected_image_ids, image_ids);
+
+  cls::rbd::MirrorImageStatus status1(cls::rbd::MIRROR_IMAGE_STATUS_STATE_UNKNOWN);
+  cls::rbd::MirrorImageStatus status2(cls::rbd::MIRROR_IMAGE_STATUS_STATE_REPLAYING);
+  cls::rbd::MirrorImageStatus status3(cls::rbd::MIRROR_IMAGE_STATUS_STATE_ERROR);
+
+  ASSERT_EQ(0, mirror_image_status_set(&ioctx, "image_id1", status1));
+  ASSERT_EQ(0, mirror_image_status_set(&ioctx, "image_id2", status2));
+  ASSERT_EQ(0, mirror_image_status_set(&ioctx, "image_id3", status3));
+
+  uint64_t read_instance_id;
+  cls::rbd::MirrorImageStatus read_status;
+  ASSERT_EQ(0, mirror_image_status_get(&ioctx, "image_id1", &read_instance_id,
+	  &read_status));
+  ASSERT_EQ(read_instance_id, instance_id);
+  ASSERT_EQ(read_status, status1);
+  ASSERT_EQ(0, mirror_image_status_get(&ioctx, "image_id2", &read_instance_id,
+	  &read_status));
+  ASSERT_EQ(read_instance_id, instance_id);
+  ASSERT_EQ(read_status, status2);
+  ASSERT_EQ(0, mirror_image_status_get(&ioctx, "image_id3", &read_instance_id,
+	  &read_status));
+  ASSERT_EQ(read_instance_id, instance_id);
+  ASSERT_EQ(read_status, status3);
+
+  ASSERT_EQ(0, mirror_image_status_list(&ioctx, &image_ids));
+  expected_image_ids = {{"image_id1"}, {"image_id2"}, {"image_id3"}};
+  ASSERT_EQ(expected_image_ids, image_ids);
+
+  ASSERT_EQ(0, mirror_image_status_remove(&ioctx, "image_id2"));
+
+  ASSERT_EQ(0, mirror_image_status_list(&ioctx, &image_ids));
+  expected_image_ids = {{"image_id1"}, {"image_id3"}};
+  ASSERT_EQ(expected_image_ids, image_ids);
+
+  status1.state = cls::rbd::MIRROR_IMAGE_STATUS_STATE_ERROR;
+  status3.state = cls::rbd::MIRROR_IMAGE_STATUS_STATE_UNKNOWN;
+  ASSERT_EQ(0, mirror_image_status_set(&ioctx, "image_id1", status1));
+  ASSERT_EQ(0, mirror_image_status_get(&ioctx, "image_id1", &read_instance_id,
+	  &read_status));
+  ASSERT_EQ(read_instance_id, instance_id);
+  ASSERT_EQ(read_status, status1);
+  ASSERT_EQ(0, mirror_image_status_set(&ioctx, "image_id3", status3));
+  ASSERT_EQ(0, mirror_image_status_remove(&ioctx, "image_id1"));
+  ASSERT_EQ(0, mirror_image_status_remove(&ioctx, "image_id3"));
+
+  ASSERT_EQ(0, mirror_image_status_list(&ioctx, &image_ids));
+  expected_image_ids = {};
+  ASSERT_EQ(expected_image_ids, image_ids);
+
+  ASSERT_EQ(0, mirror_image_status_set(&ioctx, "image_id1", status1));
+  ASSERT_EQ(0, mirror_image_status_init(&ioctx, instance_id));
   expected_image_ids = {};
   ASSERT_EQ(expected_image_ids, image_ids);
 }

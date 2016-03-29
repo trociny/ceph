@@ -10,6 +10,8 @@
 #include "common/Formatter.h"
 #include "common/TextTable.h"
 #include "global/global_context.h"
+#include "cls/rbd/cls_rbd_client.h"
+#include "cls/rbd/cls_rbd_types.h"
 #include <iostream>
 #include <boost/program_options.hpp>
 #include <boost/regex.hpp>
@@ -374,6 +376,95 @@ int execute_info(const po::variables_map &vm) {
   return 0;
 }
 
+void get_status_arguments(po::options_description *positional,
+			  po::options_description *options) {
+  at::add_pool_options(positional, options);
+  at::add_format_options(options);
+}
+
+int execute_status(const po::variables_map &vm) {
+  size_t arg_index = 0;
+  std::string pool_name = utils::get_pool_name(vm, &arg_index);
+
+  at::Format::Formatter formatter;
+  int r = utils::get_formatter(vm, &formatter);
+  if (r < 0) {
+    return r;
+  }
+
+  std::string config_path;
+  if (vm.count(at::CONFIG_PATH)) {
+    config_path = vm[at::CONFIG_PATH].as<std::string>();
+  }
+
+  librados::Rados rados;
+  librados::IoCtx io_ctx;
+  r = utils::init(pool_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  std::vector<string> image_ids;
+
+  r = librbd::cls_client::mirror_image_status_list(&io_ctx, &image_ids);
+  if (r < 0) {
+    std::cerr << "rbd: faild to get image status list: " << cpp_strerror(r)
+	      << std::endl;
+    return r;
+  }
+
+  std::set<uint64_t> watcher_ids;
+  std::list<obj_watch_t> watchers;
+  r = io_ctx.list_watchers(RBD_MIRRORING_STATUS, &watchers);
+  if (r < 0) {
+    std::cerr << "rbd: failed to get " << RBD_MIRRORING_STATUS << " watchers: "
+	      << cpp_strerror(r) << std::endl;
+  }
+  for (auto i = watchers.begin(); i != watchers.end(); i++) {
+    watcher_ids.insert(i->watcher_id);
+  }
+
+  if (formatter != nullptr) {
+    formatter->open_object_section("images");
+  }
+
+  int ret = 0;
+  for (const auto &image_id : image_ids) {
+    uint64_t instance_id;
+    cls::rbd::MirrorImageStatus status;
+    r = librbd::cls_client::mirror_image_status_get(&io_ctx, image_id,
+						    &instance_id, &status);
+    if (r < 0) {
+      std::cerr << "rbd: faild to get status for image " << image_id << ": "
+		<< cpp_strerror(r) << std::endl;
+      ret = r;
+      continue;
+    }
+
+    if (watcher_ids.find(instance_id) == watcher_ids.end()) {
+      std::cerr << "rbd: " << RBD_MIRRORING_STATUS
+		<< " not watched by claimed owner (client." << instance_id
+		<< "), expect outdated status" << std::endl;
+    }
+
+    if (formatter != nullptr) {
+      formatter->open_object_section("image");
+      formatter->dump_string("image_id", image_id);
+      formatter->dump_stream("state") << status.state;
+      formatter->close_section();
+    } else {
+      std::cout << image_id << ": " << status.state << std::endl;
+    }
+  }
+
+  if (formatter != nullptr) {
+    formatter->close_section();
+    formatter->flush(std::cout);
+  }
+
+  return ret;
+}
+
 Shell::Action action_add(
   {"mirror", "pool", "peer", "add"}, {},
   "Add a mirroring peer to a pool.", "",
@@ -399,6 +490,10 @@ Shell::Action action_info(
   {"mirror", "pool", "info"}, {},
   "Show information about the pool mirroring configuration.", {},
   &get_info_arguments, &execute_info);
+Shell::Action action_status(
+  {"mirror", "pool", "status"}, {},
+  "Show status for all mirrored images in the pool.", {},
+  &get_status_arguments, &execute_status);
 
 } // namespace mirror_pool
 } // namespace action

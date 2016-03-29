@@ -80,6 +80,38 @@ std::ostream& operator<<(std::ostream& os, const MirrorImage& mirror_image);
 
 WRITE_CLASS_ENCODER(MirrorImage);
 
+enum MirrorImageStatusState {
+  MIRROR_IMAGE_STATUS_STATE_UNKNOWN         = 0,
+  MIRROR_IMAGE_STATUS_STATE_ERROR           = 1,
+  MIRROR_IMAGE_STATUS_STATE_SYNCING         = 2,
+  MIRROR_IMAGE_STATUS_STATE_STARTING_REPLAY = 3,
+  MIRROR_IMAGE_STATUS_STATE_REPLAYING       = 4,
+  MIRROR_IMAGE_STATUS_STATE_STOPPING_REPLAY = 5,
+  MIRROR_IMAGE_STATUS_STATE_STOPPED         = 6,
+};
+
+struct MirrorImageStatus {
+  MirrorImageStatus() {}
+  MirrorImageStatus(MirrorImageStatusState state)
+    : state(state) {}
+
+  MirrorImageStatusState state = MIRROR_IMAGE_STATUS_STATE_UNKNOWN;
+  std::string error;
+
+  void encode(bufferlist &bl) const;
+  void decode(bufferlist::iterator &it);
+  void dump(Formatter *f) const;
+
+  static void generate_test_instances(std::list<MirrorImageStatus*> &o);
+
+  bool operator==(const MirrorImageStatus &rhs) const;
+};
+
+std::ostream& operator<<(std::ostream& os, const MirrorImageStatus& status);
+std::ostream& operator<<(std::ostream& os, const MirrorImageStatusState& state);
+
+WRITE_CLASS_ENCODER(MirrorImageStatus);
+
 } // namespace rbd
 } // namespace cls
 

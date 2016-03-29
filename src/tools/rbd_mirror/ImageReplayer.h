@@ -12,6 +12,7 @@
 #include "common/WorkQueue.h"
 #include "include/rados/librados.hpp"
 #include "cls/journal/cls_journal_types.h"
+#include "cls/rbd/cls_rbd_types.h"
 #include "librbd/journal/Types.h"
 #include "types.h"
 
@@ -185,6 +186,8 @@ private:
   int get_bootstrap_params(BootstrapParams *params);
 
   void shut_down_journal_replay(bool cancel_ops);
+
+  void mirror_image_status_set(const cls::rbd::MirrorImageStatus &status);
 
   friend std::ostream &operator<<(std::ostream &os,
 				  const ImageReplayer &replayer);
