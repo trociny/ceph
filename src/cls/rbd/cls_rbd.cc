@@ -3014,6 +3014,10 @@ int read_peers(cls_method_context_t hctx,
 	return -EIO;
       }
     }
+
+    if (!vals.empty()) {
+      last_read = vals.rbegin()->first;
+    }
   }
   return 0;
 }
@@ -3069,6 +3073,10 @@ int image_list_ids(cls_method_context_t hctx, vector<string> *image_ids) {
 	return 0;
       }
       image_ids->push_back(image_key.substr(IMAGE_KEY_PREFIX.size()));
+    }
+
+    if (!keys.empty()) {
+      last_read = *(keys.rbegin());
     }
   }
   return 0;
