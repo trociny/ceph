@@ -30,10 +30,15 @@ set(librbd_internal_srcs
   exclusive_lock/ReleaseRequest.cc
   exclusive_lock/StandardPolicy.cc
   image/CloseRequest.cc
+  image/CreateObjectMapRequest.cc
   image/CreateRequest.cc
+  image/MirrorDisableRequest.cc
+  image/MirrorEnableRequest.cc
   image/OpenRequest.cc
   image/RefreshParentRequest.cc
   image/RefreshRequest.cc
+  image/RemoveObjectMapRequest.cc
+  image/SetFlagsRequest.cc
   image/SetSnapRequest.cc
   image_watcher/Notifier.cc
   image_watcher/NotifyLockOwner.cc
@@ -51,6 +56,8 @@ set(librbd_internal_srcs
   object_map/SnapshotRollbackRequest.cc
   object_map/UnlockRequest.cc
   object_map/UpdateRequest.cc
+  operation/DisableFeaturesRequest.cc
+  operation/EnableFeaturesRequest.cc
   operation/FlattenRequest.cc
   operation/ObjectMapIterate.cc
   operation/RebuildObjectMapRequest.cc

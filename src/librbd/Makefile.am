@@ -35,10 +35,15 @@ librbd_internal_la_SOURCES = \
 	librbd/exclusive_lock/ReleaseRequest.cc \
 	librbd/exclusive_lock/StandardPolicy.cc \
 	librbd/image/CloseRequest.cc \
+	librbd/image/CreateObjectMapRequest.cc \
 	librbd/image/CreateRequest.cc \
+	librbd/image/MirrorDisableRequest.cc \
+	librbd/image/MirrorEnableRequest.cc \
 	librbd/image/OpenRequest.cc \
 	librbd/image/RefreshParentRequest.cc \
 	librbd/image/RefreshRequest.cc \
+	librbd/image/RemoveObjectMapRequest.cc \
+	librbd/image/SetFlagsRequest.cc \
 	librbd/image/SetSnapRequest.cc \
 	librbd/image_watcher/Notifier.cc \
 	librbd/image_watcher/NotifyLockOwner.cc \
@@ -56,6 +61,8 @@ librbd_internal_la_SOURCES = \
 	librbd/object_map/SnapshotRollbackRequest.cc \
 	librbd/object_map/UnlockRequest.cc \
 	librbd/object_map/UpdateRequest.cc \
+	librbd/operation/DisableFeaturesRequest.cc \
+	librbd/operation/EnableFeaturesRequest.cc \
 	librbd/operation/FlattenRequest.cc \
 	librbd/operation/RebuildObjectMapRequest.cc \
 	librbd/operation/ObjectMapIterate.cc \
@@ -126,10 +133,15 @@ noinst_HEADERS += \
 	librbd/exclusive_lock/ReleaseRequest.h \
 	librbd/exclusive_lock/StandardPolicy.h \
 	librbd/image/CloseRequest.h \
+	librbd/image/CreateObjectMapRequest.h \
 	librbd/image/CreateRequest.h \
+	librbd/image/MirrorDisableRequest.h \
+	librbd/image/MirrorEnableRequest.h \
 	librbd/image/OpenRequest.h \
 	librbd/image/RefreshParentRequest.h \
 	librbd/image/RefreshRequest.h \
+	librbd/image/RemoveObjectMapRequest.h \
+	librbd/image/SetFlagsRequest.h \
 	librbd/image/SetSnapRequest.h \
 	librbd/image_watcher/Notifier.h \
 	librbd/image_watcher/NotifyLockOwner.h \
@@ -152,6 +164,8 @@ noinst_HEADERS += \
 	librbd/object_map/SnapshotRollbackRequest.h \
 	librbd/object_map/UnlockRequest.h \
 	librbd/object_map/UpdateRequest.h \
+	librbd/operation/DisbaleFeaturesRequest.h \
+	librbd/operation/EnableFeaturesRequest.h \
 	librbd/operation/FlattenRequest.h \
 	librbd/operation/RebuildObjectMapRequest.h \
 	librbd/operation/ObjectMapIterate.h \

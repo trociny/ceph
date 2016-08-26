@@ -53,6 +53,17 @@ template <typename I>
 int MirroringWatcher<I>::notify_image_updated(
     librados::IoCtx &io_ctx, cls::rbd::MirrorImageState mirror_image_state,
     const std::string &image_id, const std::string &global_image_id) {
+  C_SaferCond cond;
+  notify_image_updated(io_ctx, mirror_image_state, image_id, global_image_id,
+                       &cond);
+  return cond.wait();
+}
+
+template <typename I>
+int MirroringWatcher<I>::notify_image_updated(
+    librados::IoCtx &io_ctx, cls::rbd::MirrorImageState mirror_image_state,
+    const std::string &image_id, const std::string &global_image_id,
+    Context *on_finish) {
   CephContext *cct = reinterpret_cast<CephContext*>(io_ctx.cct());
   ldout(cct, 20) << dendl;
 
