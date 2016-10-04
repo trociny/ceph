@@ -4,6 +4,7 @@ set(rbd_mirror_internal
   ImageDeleter.cc
   ImageSync.cc
   ImageSyncThrottler.cc
+  LeaderWatcher.cc
   Mirror.cc
   MirrorStatusWatcher.cc
   PoolWatcher.cc
@@ -22,7 +23,8 @@ set(rbd_mirror_internal
   image_sync/SnapshotCopyRequest.cc
   image_sync/SnapshotCreateRequest.cc
   image_sync/SyncPointCreateRequest.cc
-  image_sync/SyncPointPruneRequest.cc)
+  image_sync/SyncPointPruneRequest.cc
+  leader_watcher/Types.cc)
 add_library(rbd_mirror_internal STATIC
   ${rbd_mirror_internal})
 
