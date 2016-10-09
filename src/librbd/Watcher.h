@@ -49,6 +49,7 @@ protected:
   };
 
   librados::IoCtx& m_ioctx;
+  ContextWQ *m_work_queue;
   std::string m_oid;
   CephContext *m_cct;
   mutable RWLock m_watch_lock;
@@ -125,8 +126,6 @@ private:
       on_finish->complete(r);
     }
   };
-
-  ContextWQ *m_work_queue;
 
   WatchCtx m_watch_ctx;
   Context *m_unregister_watch_ctx = nullptr;
