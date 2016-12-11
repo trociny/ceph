@@ -40,7 +40,7 @@ testlog "TEST: start the second daemon instance and test replay"
 start_mirror ${CLUSTER1}:1
 image1=test1
 create_image ${CLUSTER2} ${POOL} ${image1}
-test_replay 1 ${image} ${image1}
+test_replay 0 ${image} ${image1}
 
 testlog "TEST: stop the first daemon instance and test replay"
 stop_mirror ${CLUSTER1}:0
@@ -52,6 +52,6 @@ testlog "TEST: start the first daemon instance and test replay"
 start_mirror ${CLUSTER1}:0
 image3=test3
 create_image ${CLUSTER2} ${POOL} ${image3}
-test_replay 0 ${image2} ${image3}
+test_replay 1 ${image2} ${image3}
 
 echo OK
