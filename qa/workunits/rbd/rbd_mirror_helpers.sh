@@ -249,7 +249,7 @@ start_mirror()
     rbd-mirror \
 	--cluster ${cluster} \
 	--pid-file=$(daemon_pid_file "${cluster}:${instance}") \
-	--log-file=${TEMPDIR}/rbd-mirror.${cluster}_daemon.${instance}.\$cluster.\$pid.log \
+	--log-file=${TEMPDIR}/rbd-mirror.${cluster}_daemon.${instance}.log \
 	--admin-socket=${TEMPDIR}/rbd-mirror.${cluster}_daemon.${instance}.\$cluster.asok \
 	--rbd-mirror-journal-poll-age=1 \
 	--debug-rbd=30 --debug-journaler=30 \
