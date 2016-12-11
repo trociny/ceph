@@ -14,6 +14,10 @@ class LeaderWatcher : public librbd::Watcher {
 public:
   LeaderWatcher(librados::IoCtx &io_ctx, ContextWQ *work_queue);
 
+  std::string get_oid() const {
+    return m_oid;
+  }
+
   int init();
   void shut_down();
 
