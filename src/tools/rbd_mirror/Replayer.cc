@@ -13,6 +13,7 @@
 #include "include/stringify.h"
 #include "cls/rbd/cls_rbd_client.h"
 #include "global/global_context.h"
+#include "librbd/Utils.h"
 #include "librbd/Watcher.h"
 #include "librbd/internal.h"
 #include "Replayer.h"
@@ -33,6 +34,8 @@ using librbd::cls_client::dir_get_name;
 
 namespace rbd {
 namespace mirror {
+
+using librbd::util::create_context_callback;
 
 namespace {
 
@@ -428,6 +431,9 @@ void Replayer::init_local_mirroring_images() {
   } while (r == max_read);
 
   m_init_images = std::move(images);
+
+  Mutex::Locker locker(m_lock);
+  init_leader_watcher();
 }
 
 void Replayer::run()
@@ -463,7 +469,11 @@ void Replayer::run()
 	  last_set_sources = now;
 	}
       } else if (now > m_leader_last_heartbeat + 2 * heartbeat_interval) {
-	set_sources(empty_sources);
+	if (m_leader_watcher) {
+	  acquire_leader_lock();
+	} else {
+	  init_leader_watcher();
+	}
       }
     }
 
@@ -638,7 +648,7 @@ void Replayer::set_sources(const ImageIds &image_ids)
 
   if (image_ids.empty()) {
     if (existing_image_replayers && m_image_replayers.empty()) {
-      mirror_image_status_shut_down();
+      shut_down_leader_watcher();
     }
     return;
   }
@@ -664,10 +674,6 @@ void Replayer::set_sources(const ImageIds &image_ids)
   if (m_image_replayers.empty() && !existing_image_replayers) {
     // create entry for pool if it doesn't exist
     r = init_leader_watcher();
-    if (r < 0) {
-      return;
-    }
-    r = mirror_image_status_init();
     if (r < 0) {
       return;
     }
@@ -709,6 +715,9 @@ int Replayer::init_leader_watcher() {
   }
 
   m_leader_watcher = std::move(leader_watcher);
+  m_leader_lock.reset(new LeaderLock(m_local_io_ctx, m_threads->work_queue,
+                                     m_leader_watcher->get_oid(),
+                                     m_leader_watcher.get()));
   acquire_leader_lock();
   return 0;
 }
@@ -723,30 +732,92 @@ void Replayer::shut_down_leader_watcher() {
 
   release_leader_lock();
 
+  C_SaferCond cond;
+  m_leader_lock->shut_down(&cond);
+  m_lock.Unlock();
+  cond.wait();
+  m_lock.Lock();
+
   m_leader_watcher->shut_down();
+  m_leader_lock.reset();
   m_leader_watcher.reset();
 }
 
 void Replayer::acquire_leader_lock() {
+  dout(20) << dendl;
+
   assert(m_lock.is_locked());
   assert(m_leader_watcher);
+  assert(m_leader_lock);
 
-  Context *ctx =
-    new ContainerContext<std::shared_ptr<LeaderWatcher> >(m_leader_watcher);
-  m_leader_watcher->notify_lock_acquired(ctx);
+  Context *ctx = create_context_callback<
+    Replayer, &Replayer::handle_acquire_leader_lock>(this);
+
+  m_leader_lock->try_acquire_lock(ctx);
+}
+
+void Replayer::handle_acquire_leader_lock(int r) {
+  dout(20) << dendl;
+
+  if (r < 0) {
+    derr << "error acquiring leader lock: " << cpp_strerror(r)  << dendl;
+    return;
+  }
+
+  r = mirror_image_status_init();
+  if (r < 0) {
+    return;
+  }
+
+  FunctionContext *ctx = new FunctionContext(
+    [this](int r) {
+      Mutex::Locker locker(m_lock);
+      m_leader = true;
+      m_cond.Signal();
+    });
+
+  m_threads->work_queue->queue(ctx, 0);
 }
 
 void Replayer::release_leader_lock() {
+  dout(20) << dendl;
+
   assert(m_lock.is_locked());
   assert(m_leader_watcher);
+  assert(m_leader_lock);
 
-  Context *ctx =
-    new ContainerContext<std::shared_ptr<LeaderWatcher> >(m_leader_watcher);
-  m_leader_watcher->notify_lock_released(ctx);
+  Context *ctx = create_context_callback<
+    Replayer, &Replayer::handle_release_leader_lock>(this);
+
+  m_leader_lock->release_lock(ctx);
+}
+
+void Replayer::handle_release_leader_lock(int r) {
+  dout(20) << dendl;
+
+  if (r < 0) {
+    derr << "error releasing leader lock: " << cpp_strerror(r)  << dendl;
+  }
+
+  mirror_image_status_shut_down();
+
+  FunctionContext *ctx = new FunctionContext(
+    [this](int r) {
+      Mutex::Locker locker(m_lock);
+      m_leader = false;
+      m_cond.Signal();
+    });
+
+  m_threads->work_queue->queue(ctx, 0);
 }
 
 int Replayer::mirror_image_status_init() {
-  assert(!m_status_watcher);
+  dout(20) << dendl;
+
+  if (m_status_watcher) {
+    dout(20) << "already initialized" << dendl;
+    return 0;
+  }
 
   uint64_t instance_id = librados::Rados(m_local_io_ctx).get_instance_id();
   dout(20) << "pool_id=" << m_local_pool_id << ", "
@@ -776,7 +847,12 @@ int Replayer::mirror_image_status_init() {
 }
 
 void Replayer::mirror_image_status_shut_down() {
-  assert(m_status_watcher);
+  dout(20) << dendl;
+
+  if (!m_status_watcher) {
+    dout(20) << "not initialized" << dendl;
+    return;
+  }
 
   int r = m_status_watcher->unregister_watch();
   if (r < 0) {
@@ -905,8 +981,6 @@ void Replayer::handle_leader_watcher_lock_released(Context *on_notify_ack) {
   {
     Mutex::Locker locker(m_lock);
     acquire_leader_lock();
-    m_leader = true;
-    m_cond.Signal();
   }
 
   on_notify_ack->complete(0);

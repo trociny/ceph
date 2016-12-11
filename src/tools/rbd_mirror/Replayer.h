@@ -14,6 +14,7 @@
 #include "common/WorkQueue.h"
 #include "include/atomic.h"
 #include "include/rados/librados.hpp"
+#include "librbd/ManagedLock.h"
 
 #include "ClusterWatcher.h"
 #include "ImageReplayer.h"
@@ -21,6 +22,10 @@
 #include "PoolWatcher.h"
 #include "ImageDeleter.h"
 #include "types.h"
+
+namespace librbd {
+  class ImageCtx;
+}
 
 namespace rbd {
 namespace mirror {
@@ -56,6 +61,7 @@ public:
 private:
   typedef PoolWatcher::ImageId ImageId;
   typedef PoolWatcher::ImageIds ImageIds;
+  typedef librbd::ManagedLock<librbd::ImageCtx> LeaderLock;
 
   class LeaderWatcher : public rbd::mirror::LeaderWatcher {
   public:
@@ -90,7 +96,10 @@ private:
   void shut_down_leader_watcher();
 
   void acquire_leader_lock();
+  void handle_acquire_leader_lock(int r);
+
   void release_leader_lock();
+  void handle_release_leader_lock(int r);
 
   int mirror_image_status_init();
   void mirror_image_status_shut_down();
@@ -110,7 +119,7 @@ private:
   atomic_t m_stopping;
   bool m_manual_stop = false;
   bool m_blacklisted = false;
-  bool m_leader = true;
+  bool m_leader = false;
   utime_t m_leader_last_heartbeat;
 
   peer_t m_peer;
@@ -126,6 +135,7 @@ private:
 
   std::unique_ptr<PoolWatcher> m_pool_watcher;
   std::map<std::string, std::unique_ptr<ImageReplayer<> > > m_image_replayers;
+  std::unique_ptr<LeaderLock> m_leader_lock;
   std::shared_ptr<LeaderWatcher> m_leader_watcher;
   std::unique_ptr<MirrorStatusWatchCtx> m_status_watcher;
 
