@@ -176,8 +176,10 @@ setup()
     trap cleanup INT TERM EXIT
 
     if [ -n "${RBD_MIRROR_TEMDIR}" ]; then
+	test -d "${RBD_MIRROR_TEMDIR}" ||
 	mkdir "${RBD_MIRROR_TEMDIR}"
 	TEMPDIR="${RBD_MIRROR_TEMDIR}"
+	cd ${TEMPDIR}
     else
 	TEMPDIR=`mktemp -d`
     fi
@@ -234,6 +236,7 @@ cleanup()
         ceph --cluster ${CLUSTER1} osd pool rm ${PARENT_POOL} ${PARENT_POOL} --yes-i-really-really-mean-it
         ceph --cluster ${CLUSTER2} osd pool rm ${PARENT_POOL} ${PARENT_POOL} --yes-i-really-really-mean-it
     fi
+    test "${RBD_MIRROR_TEMDIR}" = "${TEMPDIR}" ||
     rm -Rf ${TEMPDIR}
 }
 
