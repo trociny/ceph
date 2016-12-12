@@ -32,26 +32,38 @@ test_replay()
 
 testlog "TEST: start the first daemon instance and test replay"
 start_mirror ${CLUSTER1}:0
-image=test
-create_image ${CLUSTER2} ${POOL} ${image}
-test_replay 0 ${image}
+image1=test1
+create_image ${CLUSTER2} ${POOL} ${image1}
+test_replay 0 ${image1}
 
 testlog "TEST: start the second daemon instance and test replay"
 start_mirror ${CLUSTER1}:1
-image1=test1
-create_image ${CLUSTER2} ${POOL} ${image1}
-test_replay 0 ${image} ${image1}
+image2=test2
+create_image ${CLUSTER2} ${POOL} ${image2}
+test_replay 0 ${image1} ${image2}
 
 testlog "TEST: stop the first daemon instance and test replay"
 stop_mirror ${CLUSTER1}:0
-image2=test2
-create_image ${CLUSTER2} ${POOL} ${image2}
-test_replay 1 ${image} ${image1} ${image2}
+image3=test3
+create_image ${CLUSTER2} ${POOL} ${image3}
+test_replay 1 ${image1} ${image2} ${image3}
 
 testlog "TEST: start the first daemon instance and test replay"
 start_mirror ${CLUSTER1}:0
-image3=test3
-create_image ${CLUSTER2} ${POOL} ${image3}
-test_replay 1 ${image2} ${image3}
+image4=test4
+create_image ${CLUSTER2} ${POOL} ${image4}
+test_replay 1 ${image3} ${image4}
+
+testlog "TEST: crash the first daemon instance and test replay"
+stop_mirror ${CLUSTER1}:0 -KILL
+image5=test5
+create_image ${CLUSTER2} ${POOL} ${image5}
+test_replay 1 ${image1} ${image4} ${image5}
+
+testlog "TEST: start the first daemon instance and test replay"
+start_mirror ${CLUSTER1}:0
+image6=test6
+create_image ${CLUSTER2} ${POOL} ${image6}
+test_replay 1 ${image1} ${image2} ${image3} ${image4} ${image5} ${image6}
 
 echo OK
