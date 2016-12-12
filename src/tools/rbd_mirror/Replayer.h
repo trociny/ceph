@@ -101,8 +101,10 @@ private:
   void release_leader_lock();
   void handle_release_leader_lock(int r);
 
-  int mirror_image_status_init();
-  void mirror_image_status_shut_down();
+  void blacklist_leader();
+
+  void mirror_image_status_init(Context *on_finish);
+  void mirror_image_status_shut_down(Context *on_finish);
 
   int init_rados(const std::string &cluser_name, const std::string &client_name,
                  const std::string &description, RadosRef *rados_ref);
@@ -136,7 +138,7 @@ private:
   std::unique_ptr<PoolWatcher> m_pool_watcher;
   std::map<std::string, std::unique_ptr<ImageReplayer<> > > m_image_replayers;
   std::unique_ptr<LeaderLock> m_leader_lock;
-  std::shared_ptr<LeaderWatcher> m_leader_watcher;
+  std::unique_ptr<LeaderWatcher> m_leader_watcher;
   std::unique_ptr<MirrorStatusWatchCtx> m_status_watcher;
 
   std::string m_asok_hook_name;
