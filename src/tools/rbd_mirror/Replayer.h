@@ -101,8 +101,6 @@ private:
   void release_leader_lock();
   void handle_release_leader_lock(int r);
 
-  void blacklist_leader();
-
   void mirror_image_status_init(Context *on_finish);
   void mirror_image_status_shut_down(Context *on_finish);
 

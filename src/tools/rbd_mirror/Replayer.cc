@@ -470,7 +470,6 @@ void Replayer::run()
 	dout(0) << "no hearbeat from the leader for more than "
 		<< 2 * heartbeat_interval << " sec"
 		<< " -- reacquiring the leader lock" << dendl;
-	blacklist_leader();
 	acquire_leader_lock();
       }
     }
@@ -861,13 +860,6 @@ void Replayer::handle_release_leader_lock(int r) {
     });
 
   m_threads->work_queue->queue(ctx, 0);
-}
-
-void Replayer::blacklist_leader() {
-  dout(20) << dendl;
-
-  // TODO: we need the leader address.  Either add a method to the leader lock
-  // to return the owner address, or send it in the heartbeat messages.
 }
 
 void Replayer::mirror_image_status_init(Context *on_finish) {
