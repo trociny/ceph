@@ -189,8 +189,10 @@ setup()
         ${CEPH_SRC}/mstart.sh ${CLUSTER1} -n
         ${CEPH_SRC}/mstart.sh ${CLUSTER2} -n
 
+	rm -f ${TEMPDIR}/${CLUSTER1}.conf
         ln -s $(readlink -f run/${CLUSTER1}/ceph.conf) \
            ${TEMPDIR}/${CLUSTER1}.conf
+	rm -f ${TEMPDIR}/${CLUSTER2}.conf
         ln -s $(readlink -f run/${CLUSTER2}/ceph.conf) \
            ${TEMPDIR}/${CLUSTER2}.conf
 
