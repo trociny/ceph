@@ -288,6 +288,26 @@ public:
                 Return(r)));
   }
 
+  void expect_mirror_image_get(librados::IoCtx &io_ctx,
+                               const std::string &image_id,
+                               const std::string &global_image_id,
+                               cls::rbd::MirrorImageState state, int r) {
+    bufferlist in_bl;
+    ::encode(image_id, in_bl);
+
+    bufferlist bl;
+    ::encode(cls::rbd::MirrorImage(global_image_id, state), bl);
+
+    EXPECT_CALL(get_mock_io_ctx(io_ctx),
+                exec(RBD_MIRRORING, _, StrEq("rbd"),
+                     StrEq("mirror_image_get"), ContentsEqual(in_bl),
+                     _, _))
+      .WillOnce(DoAll(WithArg<5>(Invoke([bl](bufferlist *out_bl) {
+                                   *out_bl = bl;
+                                 })),
+                Return(r)));
+  }
+
   void expect_journaler_get_client(::journal::MockJournaler &mock_journaler,
                                    const std::string &client_id,
                                    cls::journal::Client &client, int r) {
@@ -455,6 +475,9 @@ TEST_F(TestMockImageReplayerBootstrapRequest, NonPrimaryRemoteSyncingState) {
   MockOpenImageRequest mock_open_image_request;
   expect_open_image(mock_open_image_request, m_remote_io_ctx,
                     mock_remote_image_ctx.id, mock_remote_image_ctx, 0);
+  expect_mirror_image_get(m_remote_io_ctx, mock_remote_image_ctx.id,
+                          "global image id",
+                          cls::rbd::MIRROR_IMAGE_STATE_ENABLED, 0);
   expect_journal_is_tag_owner(mock_journal, false, 0);
 
   // switch the state to replaying
@@ -512,6 +535,9 @@ TEST_F(TestMockImageReplayerBootstrapRequest, RemoteDemotePromote) {
   MockOpenImageRequest mock_open_image_request;
   expect_open_image(mock_open_image_request, m_remote_io_ctx,
                     mock_remote_image_ctx.id, mock_remote_image_ctx, 0);
+  expect_mirror_image_get(m_remote_io_ctx, mock_remote_image_ctx.id,
+                          "global image id",
+                          cls::rbd::MIRROR_IMAGE_STATE_ENABLED, 0);
   expect_journal_is_tag_owner(mock_journal, true, 0);
 
   // open the local image
@@ -590,6 +616,9 @@ TEST_F(TestMockImageReplayerBootstrapRequest, MultipleRemoteDemotePromotes) {
   MockOpenImageRequest mock_open_image_request;
   expect_open_image(mock_open_image_request, m_remote_io_ctx,
                     mock_remote_image_ctx.id, mock_remote_image_ctx, 0);
+  expect_mirror_image_get(m_remote_io_ctx, mock_remote_image_ctx.id,
+                          "global image id",
+                          cls::rbd::MIRROR_IMAGE_STATE_ENABLED, 0);
   expect_journal_is_tag_owner(mock_journal, true, 0);
 
   // open the local image
@@ -678,6 +707,9 @@ TEST_F(TestMockImageReplayerBootstrapRequest, LocalDemoteRemotePromote) {
   MockOpenImageRequest mock_open_image_request;
   expect_open_image(mock_open_image_request, m_remote_io_ctx,
                     mock_remote_image_ctx.id, mock_remote_image_ctx, 0);
+  expect_mirror_image_get(m_remote_io_ctx, mock_remote_image_ctx.id,
+                          "global image id",
+                          cls::rbd::MIRROR_IMAGE_STATE_ENABLED, 0);
   expect_journal_is_tag_owner(mock_journal, true, 0);
 
   // open the local image
@@ -754,6 +786,9 @@ TEST_F(TestMockImageReplayerBootstrapRequest, SplitBrainForcePromote) {
   MockOpenImageRequest mock_open_image_request;
   expect_open_image(mock_open_image_request, m_remote_io_ctx,
                     mock_remote_image_ctx.id, mock_remote_image_ctx, 0);
+  expect_mirror_image_get(m_remote_io_ctx, mock_remote_image_ctx.id,
+                          "global image id",
+                          cls::rbd::MIRROR_IMAGE_STATE_ENABLED, 0);
   expect_journal_is_tag_owner(mock_journal, true, 0);
 
   // open the local image

@@ -273,6 +273,22 @@ void BootstrapRequest<I>::handle_open_remote_image(int r) {
   }
 
   // TODO: make async
+
+  cls::rbd::MirrorImage mirror_image;
+  r = librbd::cls_client::mirror_image_get(&m_remote_io_ctx, m_remote_image_ctx->id,
+                                           &mirror_image);
+  if (r < 0) {
+    derr << ": failed to get remote image state: " << cpp_strerror(r) << dendl;
+  } else if (mirror_image.state != cls::rbd::MIRROR_IMAGE_STATE_ENABLED) {
+    dout(5) << ": mirroring is not enabled" << dendl;
+    r = -EAGAIN;
+  }
+  if (r < 0) {
+    m_ret_val = r;
+    close_remote_image();
+    return;
+  }
+
   bool tag_owner;
   r = Journal::is_tag_owner(m_remote_image_ctx, &tag_owner);
   if (r < 0) {

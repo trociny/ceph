@@ -99,6 +99,7 @@ public:
 
     EXPECT_EQ(0, m_remote_cluster.ioctx_create(m_remote_pool_name.c_str(),
 					       m_remote_ioctx));
+    EXPECT_EQ(0, librbd::mirror_mode_set(m_remote_ioctx, RBD_MIRROR_MODE_POOL));
 
     m_image_name = get_temp_image_name();
     uint64_t features = librbd::util::get_rbd_default_features(g_ceph_context);
