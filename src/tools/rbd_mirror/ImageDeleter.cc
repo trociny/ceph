@@ -200,7 +200,13 @@ void ImageDeleter::schedule_image_delete(RadosRef local_rados,
                                          int64_t local_pool_id,
                                          const std::string& local_image_id,
                                          const std::string& global_image_id) {
-  dout(20) << "enter" << dendl;
+  dout(20) << "local_pool_id=" << local_pool_id << ", local_image_id="
+           << local_image_id << ", global_image_id=" << global_image_id
+           << dendl;
+
+  if (local_image_id.empty()) {
+    return;
+  }
 
   Mutex::Locker locker(m_delete_lock);
 

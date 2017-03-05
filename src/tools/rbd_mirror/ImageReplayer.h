@@ -100,6 +100,19 @@ public:
 
   typedef std::set<RemoteImage> RemoteImages;
 
+  static ImageReplayer *create(
+    Threads *threads, std::shared_ptr<ImageDeleter> image_deleter,
+    ImageSyncThrottlerRef<ImageCtxT> image_sync_throttler,
+    RadosRef local, const std::string &local_mirror_uuid, int64_t local_pool_id,
+    const std::string &global_image_id) {
+    return new ImageReplayer(threads, image_deleter, image_sync_throttler,
+                             local, local_mirror_uuid, local_pool_id,
+                             global_image_id);
+  }
+  void destroy() {
+    delete this;
+  }
+
   ImageReplayer(Threads *threads, std::shared_ptr<ImageDeleter> image_deleter,
                 ImageSyncThrottlerRef<ImageCtxT> image_sync_throttler,
                 RadosRef local, const std::string &local_mirror_uuid,
