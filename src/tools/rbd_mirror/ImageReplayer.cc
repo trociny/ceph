@@ -340,6 +340,12 @@ void ImageReplayer<I>::remove_remote_image(const std::string &mirror_uuid,
 }
 
 template <typename I>
+void ImageReplayer<I>::set_remote_images(const RemoteImages &remote_images) {
+  Mutex::Locker locker(m_lock);
+  m_remote_images = remote_images;
+}
+
+template <typename I>
 bool ImageReplayer<I>::remote_images_empty() const {
   Mutex::Locker locker(m_lock);
   return m_remote_images.empty();
