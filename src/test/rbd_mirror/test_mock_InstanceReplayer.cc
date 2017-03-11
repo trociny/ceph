@@ -153,7 +153,7 @@ TEST_F(TestMockInstanceReplayer, AcquireReleaseImage) {
   EXPECT_CALL(mock_image_replayer, destroy());
 
   C_SaferCond on_release;
-  instance_replayer.release_image("global_image_id", &on_release);
+  instance_replayer.release_image("global_image_id", false, &on_release);
   ASSERT_EQ(0, on_release.wait());
 
   instance_replayer.shut_down();

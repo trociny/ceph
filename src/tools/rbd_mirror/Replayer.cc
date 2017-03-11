@@ -653,24 +653,16 @@ void Replayer::set_sources(const ImageIds &image_ids, Context *on_finish)
     }
   }
 
+  bool schedule_delete = !m_stopping.read() && m_leader_watcher->is_leader();
   auto gather_ctx = new C_Gather(g_ceph_context, on_finish);
-
-  for (auto &global_image_id : images_to_release) {
+  for (auto global_image_id : images_to_release) {
     auto ctx = gather_ctx->new_sub();
-    std::string local_image_id =
-      m_instance_replayer->get_local_image_id(global_image_id);
     ctx = new FunctionContext(
-      [this, global_image_id, local_image_id, ctx] (int r) {
-
-        if (!m_stopping.read() && m_leader_watcher->is_leader() && r >= 0) {
-          m_image_deleter->schedule_image_delete(
-            m_local_rados, m_local_pool_id, local_image_id, global_image_id);
-        }
-
+      [this, global_image_id, ctx] (int r) {
         m_image_mapper->detach(global_image_id);
         ctx->complete(r);
       });
-    m_instance_replayer->release_image(global_image_id, ctx);
+    m_instance_replayer->release_image(global_image_id, schedule_delete, ctx);
   }
 
   gather_ctx->activate();

@@ -68,9 +68,8 @@ public:
   void acquire_image(const std::string &global_image_id,
                      const ImagePeers& peers);
 
-  void release_image(const std::string &global_image_id, Context *on_finish);
-
-  std::string get_local_image_id(const std::string &global_image_id);
+  void release_image(const std::string &global_image_id, bool schedule_delete,
+                     Context *on_finish);
 
   void print_status(Formatter *f, stringstream *ss);
   void start();
