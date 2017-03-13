@@ -143,7 +143,8 @@ TEST_F(TestMockInstanceWatcher, InitShutdown) {
   librados::MockTestMemIoCtxImpl &mock_io_ctx(get_mock_io_ctx(m_local_io_ctx));
 
   auto instance_watcher = new MockInstanceWatcher(m_local_io_ctx,
-                                                  m_threads->work_queue);
+                                                  m_threads->work_queue,
+                                                  nullptr, boost::none);
   InSequence seq;
 
   // Init
@@ -167,7 +168,8 @@ TEST_F(TestMockInstanceWatcher, InitError) {
   librados::MockTestMemIoCtxImpl &mock_io_ctx(get_mock_io_ctx(m_local_io_ctx));
 
   auto instance_watcher = new MockInstanceWatcher(m_local_io_ctx,
-                                                  m_threads->work_queue);
+                                                  m_threads->work_queue,
+                                                  nullptr, boost::none);
   InSequence seq;
 
   expect_register_instance(mock_io_ctx, 0);
@@ -187,7 +189,8 @@ TEST_F(TestMockInstanceWatcher, ShutdownError) {
   librados::MockTestMemIoCtxImpl &mock_io_ctx(get_mock_io_ctx(m_local_io_ctx));
 
   auto instance_watcher = new MockInstanceWatcher(m_local_io_ctx,
-                                                  m_threads->work_queue);
+                                                  m_threads->work_queue,
+                                                  nullptr, boost::none);
   InSequence seq;
 
   // Init

@@ -1,5 +1,6 @@
 add_library(rbd_mirror_types STATIC
-  leader_watcher/Types.cc)
+  leader_watcher/Types.cc
+  instance_watcher/Types.cc)
 
 set(rbd_mirror_internal
   ClusterWatcher.cc

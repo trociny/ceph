@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "common/AsyncOpTracker.h"
 #include "librbd/ManagedLock.h"
 #include "librbd/managed_lock/Types.h"
 #include "librbd/Watcher.h"
@@ -51,17 +50,17 @@ private:
   /**
    * @verbatim
    *
-   *  <uninitialized> <------------------------------ WAIT_FOR_TASKS
+   *  <uninitialized> <------------------------------ UNREGISTER_WATCH
    *     | (init)      ^                                      ^
    *     v             *                                      |
-   *  CREATE_OBJECT  * *  (error)                     UNREGISTER_WATCH
+   *  CREATE_OBJECT  * *  (error)                     SHUT_DOWN_LEADER_LOCK
    *     |             *                                      ^
    *     v             *                                      |
-   *  REGISTER_WATCH * *                              SHUT_DOWN_LEADER_LOCK
-   *     |                                                    ^
+   *  REGISTER_WATCH * *                                      | (shut_down)
+   *     |                                                    |
    *     |           (no leader heartbeat and acquire failed) |
    *     | BREAK_LOCK <-------------------------------------\ |
-   *     |    |                 (no leader heartbeat)       | | (shut down)
+   *     |    |                 (no leader heartbeat)       | |
    *     |    |  /----------------------------------------\ | |
    *     |    |  |              (lock_released received)    | |
    *     |    |  |  /-------------------------------------\ | |
@@ -106,7 +105,7 @@ private:
     }
 
     bool is_leader() const {
-      Mutex::Locker locker(Parent::m_lock);
+      Mutex::Locker loker(Parent::m_lock);
       return Parent::is_state_post_acquiring() || Parent::is_state_locked();
     }
 
@@ -158,24 +157,6 @@ private:
     }
   };
 
-  typedef void (LeaderWatcher<ImageCtxT>::*TimerCallback)();
-
-  struct C_TimerGate : public Context {
-    LeaderWatcher *leader_watcher;
-
-    bool leader = false;
-    TimerCallback timer_callback = nullptr;
-
-    C_TimerGate(LeaderWatcher *leader_watcher)
-      : leader_watcher(leader_watcher) {
-    }
-
-    void finish(int r) override {
-      leader_watcher->m_timer_gate = nullptr;
-      leader_watcher->execute_timer_task(leader, timer_callback);
-    }
-  };
-
   Threads *m_threads;
   Listener *m_listener;
 
@@ -189,11 +170,7 @@ private:
   MirrorStatusWatcher<ImageCtxT> *m_status_watcher = nullptr;
   Instances<ImageCtxT> *m_instances = nullptr;
   librbd::managed_lock::Locker m_locker;
-
-  AsyncOpTracker m_timer_op_tracker;
   Context *m_timer_task = nullptr;
-  C_TimerGate *m_timer_gate = nullptr;
-
   bufferlist m_heartbeat_ack_bl;
 
   bool is_leader(Mutex &m_lock);
@@ -201,8 +178,7 @@ private:
   void cancel_timer_task();
   void schedule_timer_task(const std::string &name,
                            int delay_factor, bool leader,
-                           TimerCallback callback, bool shutting_down);
-  void execute_timer_task(bool leader, TimerCallback timer_callback);
+                           void (LeaderWatcher<ImageCtxT>::*callback)());
 
   void create_leader_object();
   void handle_create_leader_object(int r);
@@ -216,17 +192,13 @@ private:
   void unregister_watch();
   void handle_unregister_watch(int r);
 
-  void wait_for_tasks();
-  void handle_wait_for_tasks();
-
   void break_leader_lock();
   void handle_break_leader_lock(int r);
 
-  void schedule_get_locker(bool reset_leader, uint32_t delay_factor);
   void get_locker();
   void handle_get_locker(int r, librbd::managed_lock::Locker& locker);
 
-  void schedule_acquire_leader_lock(uint32_t delay_factor);
+  void acquire_leader_lock(bool reset_attempt_counter);
   void acquire_leader_lock();
   void handle_acquire_leader_lock(int r);
 
