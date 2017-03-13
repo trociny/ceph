@@ -10,6 +10,7 @@
 
 #include "librbd/Watcher.h"
 #include "librbd/managed_lock/Types.h"
+#include "tools/rbd_mirror/instance_watcher/Types.h"
 
 namespace librbd {
   class ImageCtx;
@@ -22,6 +23,19 @@ namespace mirror {
 template <typename ImageCtxT = librbd::ImageCtx>
 class InstanceWatcher : protected librbd::Watcher {
 public:
+  struct Listener {
+    virtual ~Listener() {
+    }
+
+    virtual void image_acquire_handler(
+      const std::string &global_image_id,
+      const instance_watcher::ImagePeers &peers) = 0;
+    virtual void image_acquired_handler(const std::string &global_image_id) = 0;
+    virtual void image_release_handler(const std::string &global_image_id,
+                                       bool schedule_delete) = 0;
+    virtual void image_released_handler(const std::string &global_image_id) = 0;
+  };
+
   static void get_instances(librados::IoCtx &io_ctx,
                             std::vector<std::string> *instance_ids,
                             Context *on_finish);
@@ -29,17 +43,16 @@ public:
                               const std::string &instance_id,
                               Context *on_finish);
 
-  static InstanceWatcher *create(
-    librados::IoCtx &io_ctx, ContextWQ *work_queue,
-    const boost::optional<std::string> &id = boost::none) {
-    return new InstanceWatcher(io_ctx, work_queue, id);
+  static InstanceWatcher *create(librados::IoCtx &io_ctx, ContextWQ *work_queue,
+                                 Listener *listener) {
+    return new InstanceWatcher(io_ctx, work_queue, listener, boost::none);
   }
   void destroy() {
     delete this;
   }
 
   InstanceWatcher(librados::IoCtx &io_ctx, ContextWQ *work_queue,
-                  const boost::optional<std::string> &id = boost::none);
+                  Listener *listener, const boost::optional<std::string> &id);
   ~InstanceWatcher() override;
 
   int init();
@@ -49,9 +62,16 @@ public:
   void shut_down(Context *on_finish);
   void remove(Context *on_finish);
 
-protected:
-  void handle_notify(uint64_t notify_id, uint64_t handle, uint64_t notifier_id,
-                     bufferlist &bl) override;
+  void notify_image_acquire(const std::string &instance_id,
+                            const std::string &global_image_id,
+                            const instance_watcher::ImagePeers& peers);
+  void notify_image_acquired(const std::string &instance_id,
+                             const std::string &global_image_id);
+  void notify_image_release(const std::string &instance_id,
+                            const std::string &global_image_id,
+                            bool schedule_delete);
+  void notify_image_released(const std::string &instance_id,
+                             const std::string &global_image_id);
 
 private:
   /**
@@ -83,7 +103,22 @@ private:
    * @endverbatim
    */
 
-  bool m_owner;
+  struct HandlePayloadVisitor : public boost::static_visitor<void> {
+    InstanceWatcher *instance_watcher;
+    Context *on_notify_ack;
+
+    HandlePayloadVisitor(InstanceWatcher *instance_watcher,
+                         Context *on_notify_ack)
+      : instance_watcher(instance_watcher), on_notify_ack(on_notify_ack) {
+    }
+
+    template <typename Payload>
+    inline void operator()(const Payload &payload) const {
+      instance_watcher->handle_payload(payload, on_notify_ack);
+    }
+  };
+
+  Listener *m_listener;
   std::string m_instance_id;
 
   mutable Mutex m_lock;
@@ -122,6 +157,28 @@ private:
 
   void break_instance_lock();
   void handle_break_instance_lock(int r);
+
+  void handle_notify(uint64_t notify_id, uint64_t handle,
+                     uint64_t notifier_id, bufferlist &bl) override;
+
+  void handle_image_acquire(const std::string &global_image_id,
+                            const instance_watcher::ImagePeers& peers);
+  void handle_image_acquired(const std::string &global_image_id);
+  void handle_image_release(const std::string &global_image_id,
+                            bool schedule_delete);
+  void handle_image_released(const std::string &global_image_id);
+
+  void handle_payload(const instance_watcher::ImageAcquirePayload &payload,
+                      Context *on_notify_ack);
+  void handle_payload(const instance_watcher::ImageAcquiredPayload &payload,
+                      Context *on_notify_ack);
+  void handle_payload(const instance_watcher::ImageReleasePayload &payload,
+                      Context *on_notify_ack);
+  void handle_payload(const instance_watcher::ImageReleasedPayload &payload,
+                      Context *on_notify_ack);
+  void handle_payload(const instance_watcher::UnknownPayload &payload,
+                      Context *on_notify_ack);
+
 };
 
 } // namespace mirror

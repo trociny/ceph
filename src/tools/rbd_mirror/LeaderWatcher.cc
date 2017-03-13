@@ -119,14 +119,13 @@ void LeaderWatcher<I>::handle_register_watch(int r) {
 
   Context *on_finish = nullptr;
   {
-    Mutex::Locker timer_locker(m_threads->timer_lock);
     Mutex::Locker locker(m_lock);
 
     if (r < 0) {
       derr << "error registering leader watcher for " << m_oid << " object: "
            << cpp_strerror(r) << dendl;
     } else {
-      schedule_acquire_leader_lock(0);
+      acquire_leader_lock(true);
     }
 
     std::swap(on_finish, m_on_finish);
@@ -198,45 +197,19 @@ template <typename I>
 void LeaderWatcher<I>::handle_unregister_watch(int r) {
   dout(20) << "r=" << r << dendl;
 
-  if (r < 0) {
-    derr << "error unregistering leader watcher for " << m_oid << " object: "
-         << cpp_strerror(r) << dendl;
+  Context *on_finish = nullptr;
+  {
+    Mutex::Locker locker(m_lock);
+
+    if (r < 0) {
+      derr << "error unregistering leader watcher for " << m_oid << " object: "
+           << cpp_strerror(r) << dendl;
+    }
+
+    assert(m_on_shut_down_finish != nullptr);
+    std::swap(on_finish, m_on_shut_down_finish);
   }
-  wait_for_tasks();
-}
-
-template <typename I>
-void LeaderWatcher<I>::wait_for_tasks() {
-  dout(20) << dendl;
-
-  Mutex::Locker timer_locker(m_threads->timer_lock);
-  Mutex::Locker locker(m_lock);
-  schedule_timer_task("wait for tasks", 0, false,
-                      &LeaderWatcher<I>::handle_wait_for_tasks, true);
-}
-
-template <typename I>
-void LeaderWatcher<I>::handle_wait_for_tasks() {
-  dout(20) << dendl;
-
-  assert(m_threads->timer_lock.is_locked());
-  assert(m_lock.is_locked());
-  assert(m_on_shut_down_finish != nullptr);
-
-  assert(!m_timer_op_tracker.empty());
-  m_timer_op_tracker.finish_op();
-
-  auto ctx = new FunctionContext([this](int r) {
-      Context *on_finish;
-      {
-        // ensure lock isn't held when completing shut down
-        Mutex::Locker locker(m_lock);
-        assert(m_on_shut_down_finish != nullptr);
-        on_finish = m_on_shut_down_finish;
-      }
-      on_finish->complete(0);
-    });
-  m_work_queue->queue(ctx, 0);
+  on_finish->complete(0);
 }
 
 template <typename I>
@@ -298,36 +271,25 @@ void LeaderWatcher<I>::cancel_timer_task() {
 template <typename I>
 void LeaderWatcher<I>::schedule_timer_task(const std::string &name,
                                            int delay_factor, bool leader,
-                                           TimerCallback timer_callback,
-                                           bool shutting_down) {
+                                           void (LeaderWatcher<I>::*cb)()) {
   assert(m_threads->timer_lock.is_locked());
   assert(m_lock.is_locked());
 
-  if (!shutting_down && m_on_shut_down_finish != nullptr) {
+  if (m_on_shut_down_finish != nullptr) {
     return;
   }
 
   cancel_timer_task();
 
   m_timer_task = new FunctionContext(
-    [this, leader, timer_callback](int r) {
+    [this, cb, leader](int r) {
       assert(m_threads->timer_lock.is_locked());
       m_timer_task = nullptr;
-
-      if (m_timer_op_tracker.empty()) {
-        Mutex::Locker locker(m_lock);
-        execute_timer_task(leader, timer_callback);
+      Mutex::Locker locker(m_lock);
+      if (is_leader(m_lock) != leader) {
         return;
       }
-
-      // old timer task is still running -- do not start next
-      // task until the previous task completes
-      if (m_timer_gate == nullptr) {
-        m_timer_gate = new C_TimerGate(this);
-        m_timer_op_tracker.wait_for_ops(m_timer_gate);
-      }
-      m_timer_gate->leader = leader;
-      m_timer_gate->timer_callback = timer_callback;
+      (this->*cb)();
     });
 
   int after = delay_factor *
@@ -336,23 +298,6 @@ void LeaderWatcher<I>::schedule_timer_task(const std::string &name,
   dout(20) << "scheduling " << name << " after " << after << " sec (task "
            << m_timer_task << ")" << dendl;
   m_threads->timer->add_event_after(after, m_timer_task);
-}
-
-template <typename I>
-void LeaderWatcher<I>::execute_timer_task(bool leader,
-                                          TimerCallback timer_callback) {
-  dout(20) << dendl;
-
-  assert(m_threads->timer_lock.is_locked());
-  assert(m_lock.is_locked());
-  assert(m_timer_op_tracker.empty());
-
-  if (is_leader(m_lock) != leader) {
-    return;
-  }
-
-  m_timer_op_tracker.start_op();
-  (this->*timer_callback)();
 }
 
 template <typename I>
@@ -411,12 +356,10 @@ template <typename I>
 void LeaderWatcher<I>::break_leader_lock() {
   dout(20) << dendl;
 
-  assert(m_threads->timer_lock.is_locked());
   assert(m_lock.is_locked());
-  assert(!m_timer_op_tracker.empty());
 
   if (m_locker.cookie.empty()) {
-    get_locker();
+    acquire_leader_lock(true);
     return;
   }
 
@@ -433,50 +376,27 @@ void LeaderWatcher<I>::handle_break_leader_lock(int r) {
 
   Mutex::Locker timer_locker(m_threads->timer_lock);
   Mutex::Locker locker(m_lock);
-  assert(!m_timer_op_tracker.empty());
 
   if (m_leader_lock->is_shutdown()) {
     dout(20) << "canceling due to shutdown" << dendl;
-    m_timer_op_tracker.finish_op();
     return;
   }
 
   if (r < 0 && r != -ENOENT) {
     derr << "error beaking leader lock: " << cpp_strerror(r)  << dendl;
-    schedule_acquire_leader_lock(1);
-    m_timer_op_tracker.finish_op();
+
+    schedule_timer_task("get locker", 1, false, &LeaderWatcher<I>::get_locker);
     return;
   }
 
-  m_locker = {};
-  m_acquire_attempts = 0;
-  acquire_leader_lock();
-}
-
-template <typename I>
-void LeaderWatcher<I>::schedule_get_locker(bool reset_leader,
-                                           uint32_t delay_factor) {
-  dout(20) << dendl;
-
-  assert(m_threads->timer_lock.is_locked());
-  assert(m_lock.is_locked());
-
-  if (reset_leader) {
-    m_locker = {};
-    m_acquire_attempts = 0;
-  }
-
-  schedule_timer_task("get locker", delay_factor, false,
-                      &LeaderWatcher<I>::get_locker, false);
+  acquire_leader_lock(true);
 }
 
 template <typename I>
 void LeaderWatcher<I>::get_locker() {
   dout(20) << dendl;
 
-  assert(m_threads->timer_lock.is_locked());
   assert(m_lock.is_locked());
-  assert(!m_timer_op_tracker.empty());
 
   C_GetLocker *get_locker_ctx = new C_GetLocker(this);
   Context *ctx = create_async_context_callback(m_work_queue, get_locker_ctx);
@@ -491,77 +411,52 @@ void LeaderWatcher<I>::handle_get_locker(int r,
 
   Mutex::Locker timer_locker(m_threads->timer_lock);
   Mutex::Locker mutex_locker(m_lock);
-  assert(!m_timer_op_tracker.empty());
 
   if (m_leader_lock->is_shutdown()) {
     dout(20) << "canceling due to shutdown" << dendl;
-    m_timer_op_tracker.finish_op();
     return;
   }
 
   if (is_leader(m_lock)) {
     m_locker = {};
-    m_timer_op_tracker.finish_op();
-    return;
-  }
+  } else {
+    if (r == -ENOENT) {
+      acquire_leader_lock(true);
+    } else {
+      if (r < 0) {
+        derr << "error retrieving leader locker: " << cpp_strerror(r) << dendl;
+      } else {
+        m_locker = locker;
+      }
 
-  if (r == -ENOENT) {
-    m_locker = {};
-    m_acquire_attempts = 0;
-    acquire_leader_lock();
-    return;
-  } else if (r < 0) {
-    derr << "error retrieving leader locker: " << cpp_strerror(r) << dendl;
-    schedule_get_locker(true, 1);
-    m_timer_op_tracker.finish_op();
-    return;
-  }
-
-  if (m_locker != locker) {
-    m_locker = locker;
-    if (m_acquire_attempts > 1) {
-      dout(10) << "new lock owner detected -- resetting heartbeat counter"
-               << dendl;
-      m_acquire_attempts = 0;
+      schedule_timer_task("acquire leader lock",
+                          m_cct->_conf->rbd_mirror_leader_max_missed_heartbeats,
+                          false, &LeaderWatcher<I>::acquire_leader_lock);
     }
   }
-
-  if (m_acquire_attempts >=
-        m_cct->_conf->rbd_mirror_leader_max_acquire_attempts_before_break) {
-    dout(0) << "breaking leader lock after " << m_acquire_attempts << " "
-            << "failed attempts to acquire" << dendl;
-    break_leader_lock();
-  } else {
-    schedule_acquire_leader_lock(1);
-    m_timer_op_tracker.finish_op();
-  }
-}
-
-template <typename I>
-void LeaderWatcher<I>::schedule_acquire_leader_lock(uint32_t delay_factor) {
-  dout(20) << dendl;
-
-  assert(m_threads->timer_lock.is_locked());
-  assert(m_lock.is_locked());
-
-  schedule_timer_task("acquire leader lock",
-                      delay_factor *
-                        m_cct->_conf->rbd_mirror_leader_max_missed_heartbeats,
-                      false, &LeaderWatcher<I>::acquire_leader_lock, false);
 }
 
 template <typename I>
 void LeaderWatcher<I>::acquire_leader_lock() {
-  assert(m_threads->timer_lock.is_locked());
-  assert(m_lock.is_locked());
-  assert(!m_timer_op_tracker.empty());
+    return acquire_leader_lock(false);
+}
 
-  ++m_acquire_attempts;
+template <typename I>
+void LeaderWatcher<I>::acquire_leader_lock(bool reset_attempt_counter) {
+  dout(20) << "reset_attempt_counter=" << reset_attempt_counter << dendl;
+
+  assert(m_lock.is_locked());
+
+  if (reset_attempt_counter) {
+    m_acquire_attempts = 0;
+  }
+
   dout(20) << "acquire_attempts=" << m_acquire_attempts << dendl;
 
   Context *ctx = create_async_context_callback(
     m_work_queue, create_context_callback<
       LeaderWatcher<I>, &LeaderWatcher<I>::handle_acquire_leader_lock>(this));
+
   m_leader_lock->try_acquire_lock(ctx);
 }
 
@@ -569,13 +464,10 @@ template <typename I>
 void LeaderWatcher<I>::handle_acquire_leader_lock(int r) {
   dout(20) << "r=" << r << dendl;
 
-  Mutex::Locker timer_locker(m_threads->timer_lock);
   Mutex::Locker locker(m_lock);
-  assert(!m_timer_op_tracker.empty());
 
   if (m_leader_lock->is_shutdown()) {
     dout(20) << "canceling due to shutdown" << dendl;
-    m_timer_op_tracker.finish_op();
     return;
   }
 
@@ -585,18 +477,22 @@ void LeaderWatcher<I>::handle_acquire_leader_lock(int r) {
     } else {
       derr << "error acquiring lock: " << cpp_strerror(r) << dendl;
     }
-
-    get_locker();
+    if (++m_acquire_attempts >
+        m_cct->_conf->rbd_mirror_leader_max_acquire_attempts_before_break) {
+      dout(0) << "breaking leader lock after failed attemts to acquire"
+              << dendl;
+      break_leader_lock();
+    } else {
+      get_locker();
+    }
     return;
   }
 
-  m_locker = {};
   m_acquire_attempts = 0;
 
   if (m_ret_val) {
     dout(5) << "releasing due to error on notify" << dendl;
     release_leader_lock();
-    m_timer_op_tracker.finish_op();
     return;
   }
 
@@ -628,7 +524,7 @@ void LeaderWatcher<I>::handle_release_leader_lock(int r) {
     return;
   }
 
-  schedule_acquire_leader_lock(1);
+  schedule_timer_task("get locker", 1, false, &LeaderWatcher<I>::get_locker);
 }
 
 template <typename I>
@@ -704,7 +600,7 @@ void LeaderWatcher<I>::handle_shut_down_status_watcher(int r) {
     }
 
     if (!is_leader(m_lock)) {
-      // ignore on releasing
+// ignore on releasing
       r = 0;
     }
 
@@ -887,13 +783,10 @@ template <typename I>
 void LeaderWatcher<I>::notify_heartbeat() {
   dout(20) << dendl;
 
-  assert(m_threads->timer_lock.is_locked());
   assert(m_lock.is_locked());
-  assert(!m_timer_op_tracker.empty());
 
   if (!is_leader(m_lock)) {
     dout(5) << "not leader, canceling" << dendl;
-    m_timer_op_tracker.finish_op();
     return;
   }
 
@@ -913,13 +806,8 @@ void LeaderWatcher<I>::handle_notify_heartbeat(int r) {
 
   Mutex::Locker timer_locker(m_threads->timer_lock);
   Mutex::Locker locker(m_lock);
-  assert(!m_timer_op_tracker.empty());
 
-  m_timer_op_tracker.finish_op();
-  if (m_leader_lock->is_shutdown()) {
-    dout(20) << "canceling due to shutdown" << dendl;
-    return;
-  } else if (!is_leader(m_lock)) {
+  if (!is_leader(m_lock)) {
     return;
   }
 
@@ -958,7 +846,7 @@ void LeaderWatcher<I>::handle_notify_heartbeat(int r) {
   }
 
   schedule_timer_task("heartbeat", 1, true,
-                      &LeaderWatcher<I>::notify_heartbeat, false);
+                      &LeaderWatcher<I>::notify_heartbeat);
 }
 
 template <typename I>
@@ -971,9 +859,9 @@ void LeaderWatcher<I>::handle_heartbeat(Context *on_notify_ack) {
     if (is_leader(m_lock)) {
       dout(5) << "got another leader heartbeat, ignoring" << dendl;
     } else {
-      cancel_timer_task();
       m_acquire_attempts = 0;
-      schedule_acquire_leader_lock(1);
+      cancel_timer_task();
+      get_locker();
     }
   }
 
@@ -991,7 +879,8 @@ void LeaderWatcher<I>::handle_lock_acquired(Context *on_notify_ack) {
       dout(5) << "got another leader lock_acquired, ignoring" << dendl;
     } else {
       cancel_timer_task();
-      schedule_get_locker(true, 0);
+      m_acquire_attempts = 0;
+      get_locker();
     }
   }
 
@@ -1009,7 +898,7 @@ void LeaderWatcher<I>::handle_lock_released(Context *on_notify_ack) {
       dout(5) << "got another leader lock_released, ignoring" << dendl;
     } else {
       cancel_timer_task();
-      schedule_get_locker(true, 0);
+      acquire_leader_lock(true);
     }
   }
 

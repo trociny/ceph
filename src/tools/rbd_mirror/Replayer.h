@@ -16,6 +16,7 @@
 #include "include/rados/librados.hpp"
 
 #include "ClusterWatcher.h"
+#include "InstanceWatcher.h"
 #include "LeaderWatcher.h"
 #include "PoolWatcher.h"
 #include "ImageDeleter.h"
@@ -30,7 +31,6 @@ struct Threads;
 class ReplayerAdminSocketHook;
 template <typename> class ImageMapper;
 template <typename> class InstanceReplayer;
-template <typename> class InstanceWatcher;
 
 /**
  * Controls mirroring for a single remote cluster.
@@ -60,13 +60,20 @@ public:
 
 private:
   void init_local_mirroring_images();
-  void set_sources(const ImageIds &image_ids, Context *on_finish);
+  bool set_sources(const ImageIds &image_ids);
 
   int init_rados(const std::string &cluster_name, const std::string &client_name,
                  const std::string &description, RadosRef *rados_ref);
 
   void handle_post_acquire_leader(Context *on_finish);
   void handle_pre_release_leader(Context *on_finish);
+
+  void handle_image_acquire(const std::string &global_image_id,
+                            const instance_watcher::ImagePeers& peers);
+  void handle_image_acquired(const std::string &global_image_id);
+  void handle_image_release(const std::string &global_image_id,
+                            bool schedule_delete);
+  void handle_image_released(const std::string &global_image_id);
 
   Threads *m_threads;
   std::shared_ptr<ImageDeleter> m_image_deleter;
@@ -92,6 +99,8 @@ private:
 
   std::string m_asok_hook_name;
   ReplayerAdminSocketHook *m_asok_hook;
+
+  std::string m_instance_id;
 
   std::set<ImageId> m_init_image_ids;
 
@@ -122,6 +131,37 @@ private:
   private:
     Replayer *m_replayer;
   } m_leader_listener;
+
+  class InstanceListener : public InstanceWatcher<>::Listener {
+  public:
+    InstanceListener(Replayer *replayer) : m_replayer(replayer) {
+    }
+
+  protected:
+    void image_acquire_handler(
+      const std::string &global_image_id,
+      const instance_watcher::ImagePeers &peers) override {
+      m_replayer->handle_image_acquire(global_image_id, peers);
+    }
+
+    void image_acquired_handler(
+      const std::string &global_image_id) override {
+      m_replayer->handle_image_acquired(global_image_id);
+    }
+
+    void image_release_handler(const std::string &global_image_id,
+                               bool schedule_delete) override {
+      m_replayer->handle_image_release(global_image_id, schedule_delete);
+    }
+
+    void image_released_handler(
+      const std::string &global_image_id) override {
+      m_replayer->handle_image_released(global_image_id);
+    }
+
+  private:
+    Replayer *m_replayer;
+  } m_instance_listener;
 
   std::unique_ptr<LeaderWatcher<> > m_leader_watcher;
   std::unique_ptr<InstanceWatcher<librbd::ImageCtx> > m_instance_watcher;

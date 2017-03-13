@@ -18,6 +18,8 @@
 namespace rbd {
 namespace mirror {
 
+using namespace instance_watcher;
+
 using librbd::util::create_async_context_callback;
 using librbd::util::create_context_callback;
 using librbd::util::create_rados_callback;
@@ -51,7 +53,8 @@ struct RemoveInstanceRequest : public Context {
 
   RemoveInstanceRequest(librados::IoCtx &io_ctx, ContextWQ *work_queue,
                         const std::string &instance_id, Context *on_finish)
-    : instance_watcher(io_ctx, work_queue, instance_id), on_finish(on_finish) {
+    : instance_watcher(io_ctx, work_queue, nullptr, instance_id),
+      on_finish(on_finish) {
   }
 
   void send() {
@@ -62,6 +65,24 @@ struct RemoveInstanceRequest : public Context {
     assert(r == 0);
 
     on_finish->complete(r);
+  }
+};
+
+struct NotifyInstanceRequest : public Context {
+  librbd::watcher::Notifier notifier;
+  bufferlist bl;
+
+  NotifyInstanceRequest(librados::IoCtx &io_ctx, ContextWQ *work_queue,
+                        const std::string &instance_id, bufferlist &&bl)
+    : notifier(work_queue, io_ctx, RBD_MIRROR_INSTANCE_PREFIX + instance_id),
+      bl(bl) {
+  }
+
+  void send() {
+    notifier.notify(bl, nullptr, this);
+  }
+
+  void finish(int r) override {
   }
 };
 
@@ -93,10 +114,11 @@ void InstanceWatcher<I>::remove_instance(librados::IoCtx &io_ctx,
 
 template <typename I>
 InstanceWatcher<I>::InstanceWatcher(librados::IoCtx &io_ctx,
-                                    ContextWQ *work_queue,
+                                    ContextWQ *work_queue, Listener *listener,
                                     const boost::optional<std::string> &id)
   : Watcher(io_ctx, work_queue, RBD_MIRROR_INSTANCE_PREFIX +
             (id ? *id : stringify(io_ctx.get_instance_id()))),
+    m_listener(listener),
     m_instance_id(id ? *id : stringify(io_ctx.get_instance_id())),
     m_lock("rbd::mirror::InstanceWatcher " + io_ctx.get_pool_name()),
     m_instance_lock(librbd::ManagedLock<I>::create(
@@ -165,12 +187,102 @@ void InstanceWatcher<I>::remove(Context *on_finish) {
 }
 
 template <typename I>
-void InstanceWatcher<I>::handle_notify(uint64_t notify_id, uint64_t handle,
-                                       uint64_t notifier_id, bufferlist &bl) {
-  dout(20) << dendl;
+void InstanceWatcher<I>::notify_image_acquire(
+  const std::string &instance_id, const std::string &global_image_id,
+  const ImagePeers& peers) {
+  dout(20) << "instance_id=" << instance_id << dendl;
 
-  bufferlist out;
-  acknowledge_notify(notify_id, handle, out);
+  Mutex::Locker locker(m_lock);
+
+  if (m_on_finish != nullptr) {
+    return;
+  }
+
+  // XXXMG: AsyncOpTracker
+
+  if (instance_id == m_instance_id) {
+    handle_image_acquire(global_image_id, peers);
+  } else {
+    bufferlist bl;
+    ::encode(NotifyMessage{ImageAcquirePayload{global_image_id, peers}}, bl);
+    auto req = new NotifyInstanceRequest(
+      m_ioctx, m_work_queue, instance_id, std::move(bl));
+    req->send();
+  }
+}
+
+template <typename I>
+void InstanceWatcher<I>::notify_image_acquired(
+  const std::string &instance_id, const std::string &global_image_id) {
+  dout(20) << "instance_id=" << instance_id << dendl;
+
+  Mutex::Locker locker(m_lock);
+
+  if (m_on_finish != nullptr) {
+    return;
+  }
+
+  // XXXMG: AsyncOpTracker
+
+  if (instance_id == m_instance_id) {
+    handle_image_acquired(global_image_id);
+  } else {
+    bufferlist bl;
+    ::encode(NotifyMessage{ImageAcquiredPayload{global_image_id}}, bl);
+    auto req = new NotifyInstanceRequest(
+      m_ioctx, m_work_queue, instance_id, std::move(bl));
+    req->send();
+  }
+}
+
+template <typename I>
+void InstanceWatcher<I>::notify_image_release(
+  const std::string &instance_id, const std::string &global_image_id,
+  bool schedule_delete) {
+  dout(20) << "instance_id=" << instance_id << dendl;
+
+  Mutex::Locker locker(m_lock);
+
+  if (m_on_finish != nullptr) {
+    return;
+  }
+
+  // XXXMG: AsyncOpTracker
+
+  if (instance_id == m_instance_id) {
+    handle_image_release(global_image_id, schedule_delete);
+  } else {
+    bufferlist bl;
+    ::encode(NotifyMessage{
+        ImageReleasePayload{global_image_id, schedule_delete}}, bl);
+    auto req = new NotifyInstanceRequest(
+      m_ioctx, m_work_queue, instance_id, std::move(bl));
+    req->send();
+  }
+}
+
+template <typename I>
+void InstanceWatcher<I>::notify_image_released(
+  const std::string &instance_id, const std::string &global_image_id) {
+  dout(20) << "instance_id=" << instance_id << dendl;
+
+  Mutex::Locker locker(m_lock);
+
+  if (m_on_finish != nullptr) {
+    return;
+  }
+
+  // XXXMG: AsyncOpTracker
+
+  if (instance_id == m_instance_id) {
+    handle_image_released(global_image_id);
+  } else {
+    bufferlist bl;
+    ::encode(NotifyMessage{ImageReleasedPayload{global_image_id}}, bl);
+    auto req = new NotifyInstanceRequest(
+      m_ioctx, m_work_queue, instance_id, std::move(bl));
+    req->send();
+  }
 }
 
 template <typename I>
@@ -493,6 +605,104 @@ void InstanceWatcher<I>::handle_break_instance_lock(int r) {
   }
 
   remove_instance_object();
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_notify(uint64_t notify_id, uint64_t handle,
+                                       uint64_t notifier_id, bufferlist &bl) {
+  dout(20) << "notify_id=" << notify_id << ", handle=" << handle << ", "
+           << "notifier_id=" << notifier_id << dendl;
+
+  Context *ctx = new librbd::watcher::C_NotifyAck(this, notify_id, handle);
+
+  NotifyMessage notify_message;
+  try {
+    bufferlist::iterator iter = bl.begin();
+    ::decode(notify_message, iter);
+  } catch (const buffer::error &err) {
+    derr << ": error decoding image notification: " << err.what() << dendl;
+    ctx->complete(0);
+    return;
+  }
+
+  apply_visitor(HandlePayloadVisitor(this, ctx), notify_message.payload);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_image_acquire(
+  const std::string &global_image_id,
+  const ImagePeers& peers) {
+  dout(20) << "global_image_id=" << global_image_id << dendl;
+
+  m_listener->image_acquire_handler(global_image_id, peers);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_image_acquired(
+  const std::string &global_image_id) {
+  dout(20) << "global_image_id=" << global_image_id << dendl;
+
+  m_listener->image_acquired_handler(global_image_id);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_image_release(
+  const std::string &global_image_id, bool schedule_delete) {
+  dout(20) << "global_image_id=" << global_image_id << dendl;
+
+  m_listener->image_release_handler(global_image_id, schedule_delete);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_image_released(
+  const std::string &global_image_id) {
+  dout(20) << "global_image_id=" << global_image_id << dendl;
+
+  m_listener->image_released_handler(global_image_id);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_payload(const ImageAcquirePayload &payload,
+					Context *on_notify_ack) {
+  dout(20) << "image_acquire" << dendl;
+
+  handle_image_acquire(payload.global_image_id, payload.peers);
+  on_notify_ack->complete(0);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_payload(const ImageAcquiredPayload &payload,
+					Context *on_notify_ack) {
+  dout(20) << "image_acquired" << dendl;
+
+  handle_image_acquired(payload.global_image_id);
+  on_notify_ack->complete(0);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_payload(const ImageReleasePayload &payload,
+					Context *on_notify_ack) {
+  dout(20) << "image_release" << dendl;
+
+  handle_image_release(payload.global_image_id, payload.schedule_delete);
+  on_notify_ack->complete(0);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_payload(const ImageReleasedPayload &payload,
+					Context *on_notify_ack) {
+  dout(20) << "image_released" << dendl;
+
+  handle_image_released(payload.global_image_id);
+  on_notify_ack->complete(0);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_payload(const UnknownPayload &payload,
+					Context *on_notify_ack) {
+  dout(20) << "unknown" << dendl;
+
+  on_notify_ack->complete(0);
 }
 
 } // namespace mirror
