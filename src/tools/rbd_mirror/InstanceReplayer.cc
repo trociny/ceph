@@ -123,8 +123,10 @@ void InstanceReplayer<I>::acquire_image(const std::string &global_image_id,
 
 template <typename I>
 void InstanceReplayer<I>::release_image(const std::string &global_image_id,
+                                        bool schedule_delete,
                                         Context *on_finish) {
-  dout(20) << "global_image_id=" << global_image_id << dendl;
+  dout(20) << "global_image_id=" << global_image_id << ", "
+           << "schedule_delete=" << schedule_delete << dendl;
 
   Mutex::Locker locker(m_lock);
 
@@ -135,19 +137,24 @@ void InstanceReplayer<I>::release_image(const std::string &global_image_id,
     return;
   }
 
-  ImageReplayer<I> *image_replayer = it->second;
-
+  auto *image_replayer = it->second;
   m_image_replayers.erase(it);
 
-  stop_image_replayer(image_replayer, on_finish);
-}
+  if (schedule_delete) {
+    auto local_image_id = image_replayer->get_local_image_id();
+    if (!local_image_id.empty()) {
+      on_finish = new FunctionContext(
+        [this, global_image_id, local_image_id, on_finish] (int r) {
+          if (r >= 0) {
+            m_image_deleter->schedule_image_delete(
+              m_local_rados, m_local_pool_id, local_image_id, global_image_id);
+          }
+          on_finish->complete(r);
+        });
+    }
+  }
 
-template <typename I>
-std::string InstanceReplayer<I>::get_local_image_id(
-  const std::string &global_image_id) {
-  Mutex::Locker locker(m_lock);
-  auto it = m_image_replayers.find(global_image_id);
-  return it != m_image_replayers.end() ? it->second->get_local_image_id() : "";
+  stop_image_replayer(image_replayer, on_finish);
 }
 
 template <typename I>
