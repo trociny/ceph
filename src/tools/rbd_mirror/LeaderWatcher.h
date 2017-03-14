@@ -43,6 +43,7 @@ public:
   void shut_down(Context *on_finish);
 
   bool is_leader();
+  bool get_leader_instance_id(std::string *instance_id);
   void release_leader();
   void list_instances(std::vector<std::string> *instance_ids);
 

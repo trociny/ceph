@@ -71,11 +71,14 @@ struct RemoveInstanceRequest : public Context {
 struct NotifyInstanceRequest : public Context {
   librbd::watcher::Notifier notifier;
   bufferlist bl;
+  AsyncOpTracker &op_tracker;
 
   NotifyInstanceRequest(librados::IoCtx &io_ctx, ContextWQ *work_queue,
-                        const std::string &instance_id, bufferlist &&bl)
+                        const std::string &instance_id, bufferlist &&bl,
+			AsyncOpTracker &op_tracker)
     : notifier(work_queue, io_ctx, RBD_MIRROR_INSTANCE_PREFIX + instance_id),
-      bl(bl) {
+      bl(bl), op_tracker(op_tracker) {
+    op_tracker.start_op();
   }
 
   void send() {
@@ -83,6 +86,7 @@ struct NotifyInstanceRequest : public Context {
   }
 
   void finish(int r) override {
+    op_tracker.finish_op();
   }
 };
 
@@ -198,15 +202,13 @@ void InstanceWatcher<I>::notify_image_acquire(
     return;
   }
 
-  // XXXMG: AsyncOpTracker
-
   if (instance_id == m_instance_id) {
     handle_image_acquire(global_image_id, peers);
   } else {
     bufferlist bl;
     ::encode(NotifyMessage{ImageAcquirePayload{global_image_id, peers}}, bl);
     auto req = new NotifyInstanceRequest(
-      m_ioctx, m_work_queue, instance_id, std::move(bl));
+      m_ioctx, m_work_queue, instance_id, std::move(bl), m_notify_op_tracker);
     req->send();
   }
 }
@@ -222,15 +224,13 @@ void InstanceWatcher<I>::notify_image_acquired(
     return;
   }
 
-  // XXXMG: AsyncOpTracker
-
   if (instance_id == m_instance_id) {
     handle_image_acquired(global_image_id);
   } else {
     bufferlist bl;
     ::encode(NotifyMessage{ImageAcquiredPayload{global_image_id}}, bl);
     auto req = new NotifyInstanceRequest(
-      m_ioctx, m_work_queue, instance_id, std::move(bl));
+      m_ioctx, m_work_queue, instance_id, std::move(bl), m_notify_op_tracker);
     req->send();
   }
 }
@@ -247,8 +247,6 @@ void InstanceWatcher<I>::notify_image_release(
     return;
   }
 
-  // XXXMG: AsyncOpTracker
-
   if (instance_id == m_instance_id) {
     handle_image_release(global_image_id, schedule_delete);
   } else {
@@ -256,7 +254,7 @@ void InstanceWatcher<I>::notify_image_release(
     ::encode(NotifyMessage{
         ImageReleasePayload{global_image_id, schedule_delete}}, bl);
     auto req = new NotifyInstanceRequest(
-      m_ioctx, m_work_queue, instance_id, std::move(bl));
+      m_ioctx, m_work_queue, instance_id, std::move(bl), m_notify_op_tracker);
     req->send();
   }
 }
@@ -272,15 +270,13 @@ void InstanceWatcher<I>::notify_image_released(
     return;
   }
 
-  // XXXMG: AsyncOpTracker
-
   if (instance_id == m_instance_id) {
     handle_image_released(global_image_id);
   } else {
     bufferlist bl;
     ::encode(NotifyMessage{ImageReleasedPayload{global_image_id}}, bl);
     auto req = new NotifyInstanceRequest(
-      m_ioctx, m_work_queue, instance_id, std::move(bl));
+      m_ioctx, m_work_queue, instance_id, std::move(bl), m_notify_op_tracker);
     req->send();
   }
 }
@@ -532,6 +528,29 @@ void InstanceWatcher<I>::handle_unregister_instance(int r) {
   if (r < 0) {
     derr << "error unregistering instance: " << cpp_strerror(r) << dendl;
   }
+
+  Mutex::Locker locker(m_lock);
+  wait_for_notify_ops();
+}
+
+template <typename I>
+void InstanceWatcher<I>::wait_for_notify_ops() {
+  dout(20) << dendl;
+
+  assert(m_lock.is_locked());
+
+  Context *ctx = create_async_context_callback(
+    m_work_queue, create_context_callback<
+    InstanceWatcher<I>, &InstanceWatcher<I>::handle_wait_for_notify_ops>(this));
+
+  m_notify_op_tracker.wait_for_ops(ctx);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_wait_for_notify_ops(int r) {
+  dout(20) << "r=" << r << dendl;
+
+  assert(r == 0);
 
   Context *on_finish = nullptr;
   {

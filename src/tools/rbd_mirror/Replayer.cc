@@ -269,8 +269,7 @@ int Replayer::init()
   if (r < 0) {
     return r;
   }
-
-  r = init_rados(m_peer.cluster_name, m_peer.client_name,
+r = init_rados(m_peer.cluster_name, m_peer.client_name,
                  std::string("remote peer ") + stringify(m_peer),
                  &m_remote_rados);
   if (r < 0) {
@@ -331,10 +330,6 @@ int Replayer::init()
     derr << "error initializing instance replayer: " << cpp_strerror(r) << dendl;
     return r;
   }
-
-  // XXXMG: m_instance_id = m_instance_watcher->get_instance_id();
-  m_instance_id = stringify(m_local_rados->get_instance_id());
-
 
   // Bootstrap existing mirroring images
   init_local_mirroring_images();
@@ -518,6 +513,11 @@ void Replayer::print_status(Formatter *f, stringstream *ss)
   f->open_object_section("replayer_status");
   f->dump_string("pool", m_local_io_ctx.get_pool_name());
   f->dump_stream("peer") << m_peer;
+  f->dump_string("instance_id", m_instance_watcher->get_instance_id());
+
+  std::string leader_instance_id;
+  m_leader_watcher->get_leader_instance_id(&leader_instance_id);
+  f->dump_string("leader_instance_id", leader_instance_id);
 
   bool leader = m_leader_watcher->is_leader();
   f->dump_bool("leader", leader);
@@ -631,8 +631,10 @@ bool Replayer::set_sources(const ImageIds &image_ids)
     m_init_image_ids.clear();
   }
 
+  std::string instance_id = m_instance_watcher->get_instance_id();
   std::vector<std::string> images_to_release, images_to_acquire;
-  m_image_mapper->update(image_ids, &images_to_release, &images_to_acquire);
+  m_image_mapper->update(instance_id, image_ids, &images_to_release,
+                         &images_to_acquire);
 
   if (!images_to_acquire.empty()) {
     std::string remote_mirror_uuid;
@@ -648,14 +650,14 @@ bool Replayer::set_sources(const ImageIds &image_ids)
       auto it = image_ids.find(ImageId(global_image_id));
       assert (it != image_ids.end());
       m_instance_watcher->notify_image_acquire(
-        m_instance_id, global_image_id,
+        instance_id, global_image_id,
         {{remote_mirror_uuid, it->id, m_remote_io_ctx.get_id()}});
     }
   }
 
   bool schedule_delete = !m_stopping.read() && m_leader_watcher->is_leader();
   for (auto global_image_id : images_to_release) {
-    m_instance_watcher->notify_image_release(m_instance_id, global_image_id,
+    m_instance_watcher->notify_image_release(instance_id, global_image_id,
                                              schedule_delete);
   }
 
@@ -707,7 +709,10 @@ void Replayer::handle_image_acquire(const std::string &global_image_id,
   m_instance_replayer->acquire_image(
     global_image_id, {{peer.mirror_uuid, peer.image_id, m_remote_io_ctx}});
 
-  m_instance_watcher->notify_image_acquired(m_instance_id, global_image_id);
+  std::string instance_id;
+  if (m_leader_watcher->get_leader_instance_id(&instance_id)) {
+    m_instance_watcher->notify_image_acquired(instance_id, global_image_id);
+  }
 }
 
 void Replayer::handle_image_acquired(const std::string &global_image_id) {
@@ -715,7 +720,8 @@ void Replayer::handle_image_acquired(const std::string &global_image_id) {
 
   Mutex::Locker locker(m_lock);
 
-  m_image_mapper->attach(global_image_id);
+  m_image_mapper->attach(m_instance_watcher->get_instance_id(),
+                         global_image_id);
 }
 
 void Replayer::handle_image_release(const std::string &global_image_id,
@@ -728,7 +734,12 @@ void Replayer::handle_image_release(const std::string &global_image_id,
   auto ctx = new FunctionContext(
     [this, global_image_id] (int r) {
       Mutex::Locker locker(m_lock);
-      m_instance_watcher->notify_image_released(m_instance_id, global_image_id);
+      std::string instance_id;
+      // For now, expect leader is not released until all images are released.
+      assert(m_leader_watcher->is_leader());
+      if (m_leader_watcher->get_leader_instance_id(&instance_id)) {
+        m_instance_watcher->notify_image_released(instance_id, global_image_id);
+      }
     });
 
   m_instance_replayer->release_image(global_image_id, schedule_delete, ctx);
@@ -739,7 +750,8 @@ void Replayer::handle_image_released(const std::string &global_image_id) {
 
   Mutex::Locker locker(m_lock);
 
-  m_image_mapper->detach(global_image_id);
+  m_image_mapper->detach(m_instance_watcher->get_instance_id(),
+                         global_image_id);
 }
 
 } // namespace mirror

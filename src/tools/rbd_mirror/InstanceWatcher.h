@@ -8,6 +8,7 @@
 #include <vector>
 #include <boost/optional.hpp>
 
+#include "common/AsyncOpTracker.h"
 #include "librbd/Watcher.h"
 #include "librbd/managed_lock/Types.h"
 #include "tools/rbd_mirror/instance_watcher/Types.h"
@@ -62,6 +63,10 @@ public:
   void shut_down(Context *on_finish);
   void remove(Context *on_finish);
 
+  inline std::string &get_instance_id() {
+    return m_instance_id;
+  }
+
   void notify_image_acquire(const std::string &instance_id,
                             const std::string &global_image_id,
                             const instance_watcher::ImagePeers& peers);
@@ -83,8 +88,8 @@ private:
    *       GET_INSTANCE_LOCKER  * * *>|
    *          ^ (remove)              |
    *          |                       |
-   * <uninitialized> <----------------+--------\
-   *    | (init)         ^            |        |
+   * <uninitialized> <----------------+---- WAIT_FOR_NOTIFY_OPS
+   *    | (init)         ^            |        ^
    *    v        (error) *            |        |
    * REGISTER_INSTANCE * *     * * * *|* *> UNREGISTER_INSTANCE
    *    |                      *      |        ^
@@ -127,6 +132,7 @@ private:
   int m_ret_val = 0;
   bool m_removing = false;
   librbd::managed_lock::Locker m_instance_locker;
+  AsyncOpTracker m_notify_op_tracker;
 
   void register_instance();
   void handle_register_instance(int r);
@@ -151,6 +157,9 @@ private:
 
   void unregister_instance();
   void handle_unregister_instance(int r);
+
+  void wait_for_notify_ops();
+  void handle_wait_for_notify_ops(int r);
 
   void get_instance_locker();
   void handle_get_instance_locker(int r);

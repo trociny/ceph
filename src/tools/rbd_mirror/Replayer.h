@@ -100,8 +100,6 @@ private:
   std::string m_asok_hook_name;
   ReplayerAdminSocketHook *m_asok_hook;
 
-  std::string m_instance_id;
-
   std::set<ImageId> m_init_image_ids;
 
   class ReplayerThread : public Thread {

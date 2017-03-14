@@ -6,6 +6,7 @@
 #include "common/debug.h"
 #include "common/errno.h"
 #include "cls/rbd/cls_rbd_client.h"
+#include "include/stringify.h"
 #include "librbd/Utils.h"
 #include "librbd/watcher/Types.h"
 #include "Threads.h"
@@ -226,6 +227,25 @@ bool LeaderWatcher<I>::is_leader(Mutex &lock) {
   bool leader = m_leader_lock->is_leader();
   dout(20) << leader << dendl;
   return leader;
+}
+
+template <typename I>
+bool LeaderWatcher<I>::get_leader_instance_id(std::string *instance_id) {
+  dout(20) << dendl;
+
+  Mutex::Locker locker(m_lock);
+
+  if (is_leader(m_lock)) {
+    *instance_id = stringify(m_notifier_id);
+    return true;
+  }
+
+  if (!m_locker.cookie.empty()) {
+    *instance_id = stringify(m_locker.entity.num());
+    return true;
+  }
+
+  return false;
 }
 
 template <typename I>
