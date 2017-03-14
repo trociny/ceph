@@ -302,7 +302,7 @@ void InstanceReplayer<I>::stop_image_replayer(ImageReplayer<I> *image_replayer,
 
   if (image_replayer->is_stopped()) {
     image_replayer->destroy();
-    on_finish->complete(0);
+    m_threads->work_queue->queue(on_finish, 0);
     return;
   }
 
