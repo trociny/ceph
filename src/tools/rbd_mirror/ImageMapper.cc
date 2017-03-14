@@ -30,7 +30,11 @@ void ImageMapper<I>::update(const ImageIds &image_ids,
   Mutex::Locker locker(m_lock);
 
   for (auto &it : m_images) {
-    assert(it.second == ATTACHED);
+    if (it.second != ATTACHED) {
+      dout(20) << "global_image_id=" << it.first << ", state=" << it.second
+	       << " (not attached)" << dendl;
+      assert(it.second == ATTACHING || it.second == DETACHING);
+    }
 
     if (image_ids.find(ImageId(it.first)) != image_ids.end()) {
       continue;
@@ -46,7 +50,11 @@ void ImageMapper<I>::update(const ImageIds &image_ids,
       m_images[image.global_id] = ATTACHING;
       images_to_attach->push_back(image.global_id);
     } else {
-      assert(it->second == ATTACHED);
+      if (it->second != ATTACHED) {
+	dout(20) << "global_image_id=" << it->first << ", state=" << it->second
+		 << " (not attached)" << dendl;
+	assert(it->second == ATTACHING);
+      }
     }
   }
 }
@@ -60,7 +68,13 @@ void ImageMapper<I>::attach(const std::string &global_image_id) {
   auto it = m_images.find(global_image_id);
 
   assert(it != m_images.end());
-  assert(it->second == ATTACHING);
+
+  if (it->second != ATTACHING) {
+    dout(20) << "global_image_id=" << it->first << ", state=" << it->second
+	     << " (not attaching)" << dendl;
+    assert(it->second == ATTACHED);
+    return;
+  }
 
   it->second = ATTACHED;
 }
@@ -73,7 +87,12 @@ void ImageMapper<I>::detach(const std::string &global_image_id) {
 
   auto it = m_images.find(global_image_id);
 
-  assert(it != m_images.end());
+  if (it == m_images.end()) {
+    dout(20) << "global_image_id=" << global_image_id << ": already detached"
+	     << dendl;
+    return;
+  }
+
   assert(it->second == DETACHING);
 
   m_images.erase(it);
