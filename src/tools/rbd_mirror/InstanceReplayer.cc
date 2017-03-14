@@ -300,11 +300,12 @@ void InstanceReplayer<I>::stop_image_replayer(ImageReplayer<I> *image_replayer,
   }
 
   m_async_op_tracker.start_op();
-  Context *ctx = new FunctionContext(
+  Context *ctx = create_async_context_callback(
+    m_threads->work_queue, new FunctionContext(
     [this, image_replayer, on_finish] (int r) {
       stop_image_replayer(image_replayer, on_finish);
       m_async_op_tracker.finish_op();
-    });
+    }));
 
   if (image_replayer->is_running()) {
     image_replayer->stop(ctx, false);
