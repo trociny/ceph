@@ -634,7 +634,12 @@ void InstanceWatcher<I>::handle_image_acquire(
   const ImagePeers& peers) {
   dout(20) << "global_image_id=" << global_image_id << dendl;
 
-  m_listener->image_acquire_handler(global_image_id, peers);
+  Context *ctx = new FunctionContext(
+    [this, global_image_id, peers] (int r) {
+      m_listener->image_acquire_handler(global_image_id, peers);
+    });
+
+  m_work_queue->queue(ctx, 0);
 }
 
 template <typename I>
@@ -642,7 +647,12 @@ void InstanceWatcher<I>::handle_image_acquired(
   const std::string &global_image_id) {
   dout(20) << "global_image_id=" << global_image_id << dendl;
 
-  m_listener->image_acquired_handler(global_image_id);
+  Context *ctx = new FunctionContext(
+    [this, global_image_id] (int r) {
+      m_listener->image_acquired_handler(global_image_id);
+    });
+
+  m_work_queue->queue(ctx, 0);
 }
 
 template <typename I>
@@ -650,7 +660,12 @@ void InstanceWatcher<I>::handle_image_release(
   const std::string &global_image_id, bool schedule_delete) {
   dout(20) << "global_image_id=" << global_image_id << dendl;
 
-  m_listener->image_release_handler(global_image_id, schedule_delete);
+  Context *ctx = new FunctionContext(
+    [this, global_image_id, schedule_delete] (int r) {
+      m_listener->image_release_handler(global_image_id, schedule_delete);
+    });
+
+  m_work_queue->queue(ctx, 0);
 }
 
 template <typename I>
@@ -658,7 +673,12 @@ void InstanceWatcher<I>::handle_image_released(
   const std::string &global_image_id) {
   dout(20) << "global_image_id=" << global_image_id << dendl;
 
-  m_listener->image_released_handler(global_image_id);
+  Context *ctx = new FunctionContext(
+    [this, global_image_id] (int r) {
+      m_listener->image_released_handler(global_image_id);
+    });
+
+  m_work_queue->queue(ctx, 0);
 }
 
 template <typename I>

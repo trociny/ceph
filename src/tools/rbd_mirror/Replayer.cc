@@ -333,7 +333,7 @@ int Replayer::init()
   }
 
   // XXXMG: m_instance_id = m_instance_watcher->get_instance_id();
-  m_instance_id = m_local_rados->get_instance_id();
+  m_instance_id = stringify(m_local_rados->get_instance_id());
 
 
   // Bootstrap existing mirroring images
@@ -659,7 +659,7 @@ bool Replayer::set_sources(const ImageIds &image_ids)
                                              schedule_delete);
   }
 
-  return images_to_acquire.empty() || images_to_release.empty();
+  return !images_to_acquire.empty() || !images_to_release.empty();
 }
 
 void Replayer::handle_post_acquire_leader(Context *on_finish) {
