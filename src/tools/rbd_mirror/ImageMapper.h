@@ -25,12 +25,14 @@ public:
 
   ImageMapper();
 
-  void update(const ImageIds &image_ids,
+  void update(const std::string &instance_id, const ImageIds &image_ids,
               std::vector<std::string> *images_to_detach,
               std::vector<std::string> *images_to_attach);
 
-  void attach(const std::string &global_image_id);
-  void detach(const std::string &global_image_id);
+  void attach(const std::string &instance_id,
+              const std::string &global_image_id);
+  void detach(const std::string &instance_id,
+              const std::string &global_image_id);
 
 private:
   enum State {
@@ -40,7 +42,7 @@ private:
   };
 
   Mutex m_lock;
-  std::map<std::string, State> m_images;
+  std::map<std::string, std::map<std::string, State>> m_images;
 };
 
 } // namespace mirror
