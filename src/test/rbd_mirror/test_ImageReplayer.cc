@@ -119,9 +119,10 @@ public:
     m_image_deleter.reset(new rbd::mirror::ImageDeleter(m_threads->work_queue,
                                                         m_threads->timer,
                                                         &m_threads->timer_lock));
-    m_instance_sync_throttler.reset(new rbd::mirror::InstanceSyncThrottler<>());
+    m_instance_sync_throttler.reset(
+        new rbd::mirror::InstanceSyncThrottler<>(m_threads, nullptr));
     m_image_sync_throttler.reset(
-      new rbd::mirror::ImageSyncThrottler<>(m_instance_sync_throttler.get()));
+        new rbd::mirror::ImageSyncThrottler<>(m_instance_sync_throttler.get()));
   }
 
   ~TestImageReplayer() override 

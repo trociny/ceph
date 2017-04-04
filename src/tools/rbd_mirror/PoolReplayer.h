@@ -100,6 +100,15 @@ private:
   void wait_for_update_ops(Context *on_finish);
   void handle_wait_for_update_ops(int r, Context *on_finish);
 
+  void handle_sync_request(const std::string &instance_id,
+                           const std::string &request_id);
+  void handle_sync_request_ack(const std::string &instance_id,
+                               const std::string &request_id);
+  void handle_sync_start(const std::string &instance_id,
+                         const std::string &request_id);
+  void handle_sync_complete(const std::string &instance_id,
+                            const std::string &request_id);
+
   Threads<librbd::ImageCtx> *m_threads;
   std::shared_ptr<ImageDeleter> m_image_deleter;
   mutable Mutex m_lock;
@@ -153,6 +162,26 @@ private:
 
     void pre_release_handler(Context *on_finish) override {
       m_pool_replayer->handle_pre_release_leader(on_finish);
+    }
+
+    void sync_request_handler(const std::string &instance_id,
+                              const std::string &request_id) override {
+      m_pool_replayer->handle_sync_request(instance_id, request_id);
+    }
+
+    void sync_request_ack_handler(const std::string &instance_id,
+                                  const std::string &request_id) override {
+      m_pool_replayer->handle_sync_request_ack(instance_id, request_id);
+    }
+
+    void sync_start_handler(const std::string &instance_id,
+                            const std::string &request_id) override {
+      m_pool_replayer->handle_sync_start(instance_id, request_id);
+    }
+
+    void sync_complete_handler(const std::string &instance_id,
+                               const std::string &request_id) override {
+      m_pool_replayer->handle_sync_complete(instance_id, request_id);
     }
 
   private:

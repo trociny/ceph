@@ -317,9 +317,13 @@ int PoolReplayer::init()
 
   dout(20) << "connected to " << m_peer << dendl;
 
-  m_instance_sync_throttler.reset(new InstanceSyncThrottler<>());
+  m_leader_watcher.reset(new LeaderWatcher<>(m_threads, m_local_io_ctx,
+                                             &m_leader_listener));
+
+  m_instance_sync_throttler.reset(
+      new InstanceSyncThrottler<>(m_threads, m_leader_watcher.get()));
   m_image_sync_throttler.reset(
-    new ImageSyncThrottler<>(m_instance_sync_throttler.get()));
+      new ImageSyncThrottler<>(m_instance_sync_throttler.get()));
 
   m_instance_replayer.reset(
     InstanceReplayer<>::create(m_threads, m_image_deleter,
@@ -337,8 +341,6 @@ int PoolReplayer::init()
     return r;
   }
 
-  m_leader_watcher.reset(new LeaderWatcher<>(m_threads, m_local_io_ctx,
-                                             &m_leader_listener));
   r = m_leader_watcher->init();
   if (r < 0) {
     derr << "error initializing leader watcher: " << cpp_strerror(r) << dendl;
@@ -627,11 +629,15 @@ void PoolReplayer::handle_update(const std::string &mirror_uuid,
 
 void PoolReplayer::handle_post_acquire_leader(Context *on_finish) {
   dout(20) << dendl;
+
+  m_instance_sync_throttler->handle_leader_acquired();
   refresh_local_images(on_finish);
 }
 
 void PoolReplayer::handle_pre_release_leader(Context *on_finish) {
   dout(20) << dendl;
+
+  m_instance_sync_throttler->handle_leader_released();
   shut_down_pool_watcher(on_finish);
 }
 
@@ -727,6 +733,38 @@ void PoolReplayer::handle_wait_for_update_ops(int r, Context *on_finish) {
 
   Mutex::Locker locker(m_lock);
   m_instance_replayer->release_all(on_finish);
+}
+
+void PoolReplayer::handle_sync_request(const std::string &instance_id,
+                                       const std::string &request_id) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  m_instance_sync_throttler->handle_sync_request(instance_id, request_id);
+}
+
+void PoolReplayer::handle_sync_request_ack(const std::string &instance_id,
+                                           const std::string &request_id) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  m_instance_sync_throttler->handle_sync_request_ack(instance_id, request_id);
+}
+
+void PoolReplayer::handle_sync_start(const std::string &instance_id,
+                                     const std::string &request_id) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  m_instance_sync_throttler->handle_sync_start(instance_id, request_id);
+}
+
+void PoolReplayer::handle_sync_complete(const std::string &instance_id,
+                                        const std::string &request_id) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  m_instance_sync_throttler->handle_sync_complete(instance_id, request_id);
 }
 
 } // namespace mirror

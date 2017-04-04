@@ -264,6 +264,15 @@ struct MockListener : public LeaderWatcher<librbd::MockTestImageCtx>::Listener {
 
   MOCK_METHOD1(post_acquire_handler, void(Context *));
   MOCK_METHOD1(pre_release_handler, void(Context *));
+
+  MOCK_METHOD2(sync_request_handler, void(const std::string &,
+                                          const std::string &));
+  MOCK_METHOD2(sync_request_ack_handler, void(const std::string &,
+                                              const std::string &));
+  MOCK_METHOD2(sync_start_handler, void(const std::string &,
+                                        const std::string &));
+  MOCK_METHOD2(sync_complete_handler, void(const std::string &,
+                                           const std::string &));
 };
 
 MockListener *MockListener::s_instance = nullptr;

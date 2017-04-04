@@ -71,6 +71,19 @@ public:
       }
     }
 
+    void sync_request_handler(const std::string &instance_id,
+                              const std::string &request_id) override {
+    }
+    void sync_request_ack_handler(const std::string &instance_id,
+                                  const std::string &request_id) override {
+    }
+    void sync_start_handler(const std::string &instance_id,
+                            const std::string &request_id) override {
+    }
+    void sync_complete_handler(const std::string &instance_id,
+                               const std::string &request_id) override {
+    }
+
   private:
     mutable Mutex m_test_lock;
     int m_acquire_count = 0;

@@ -33,6 +33,15 @@ public:
 
     virtual void post_acquire_handler(Context *on_finish) = 0;
     virtual void pre_release_handler(Context *on_finish) = 0;
+
+    virtual void sync_request_handler(const std::string &instance_id,
+                                      const std::string &request_id) = 0;
+    virtual void sync_request_ack_handler(const std::string &instance_id,
+                                          const std::string &request_id) = 0;
+    virtual void sync_start_handler(const std::string &instance_id,
+                                    const std::string &request_id) = 0;
+    virtual void sync_complete_handler(const std::string &instance_id,
+                                       const std::string &request_id) = 0;
   };
 
   LeaderWatcher(Threads<ImageCtxT> *threads, librados::IoCtx &io_ctx,
@@ -50,6 +59,17 @@ public:
   bool get_leader_instance_id(std::string *instance_id) const;
   void release_leader();
   void list_instances(std::vector<std::string> *instance_ids);
+
+  std::string get_instance_id();
+
+  void notify_sync_request(const std::string &instance_id,
+                           const std::string &request_id);
+  void notify_sync_request_ack(const std::string &instance_id,
+                               const std::string &request_id);
+  void notify_sync_start(const std::string &instance_id,
+                         const std::string &request_id);
+  void notify_sync_complete(const std::string &instance_id,
+                            const std::string &request_id);
 
 private:
   /**
@@ -280,12 +300,28 @@ private:
   void handle_heartbeat(Context *on_ack);
   void handle_lock_acquired(Context *on_ack);
   void handle_lock_released(Context *on_ack);
+  void handle_sync_request(const std::string &instance_id,
+                           const std::string &request_id, Context *on_ack);
+  void handle_sync_request_ack(const std::string &instance_id,
+                               const std::string &request_id, Context *on_ack);
+  void handle_sync_start(const std::string &instance_id,
+                         const std::string &request_id, Context *on_ack);
+  void handle_sync_complete(const std::string &instance_id,
+                            const std::string &request_id, Context *on_ack);
 
   void handle_payload(const leader_watcher::HeartbeatPayload &payload,
                       Context *on_notify_ack);
   void handle_payload(const leader_watcher::LockAcquiredPayload &payload,
                       Context *on_notify_ack);
   void handle_payload(const leader_watcher::LockReleasedPayload &payload,
+                      Context *on_notify_ack);
+  void handle_payload(const leader_watcher::SyncRequestPayload &payload,
+                      Context *on_notify_ack);
+  void handle_payload(const leader_watcher::SyncRequestAckPayload &payload,
+                      Context *on_notify_ack);
+  void handle_payload(const leader_watcher::SyncStartPayload &payload,
+                      Context *on_notify_ack);
+  void handle_payload(const leader_watcher::SyncCompletePayload &payload,
                       Context *on_notify_ack);
   void handle_payload(const leader_watcher::UnknownPayload &payload,
                       Context *on_notify_ack);

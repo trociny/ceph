@@ -46,6 +46,11 @@ LeaderWatcher<I>::~LeaderWatcher() {
 }
 
 template <typename I>
+std::string LeaderWatcher<I>::get_instance_id() {
+  return stringify(m_notifier_id);
+}
+
+template <typename I>
 int LeaderWatcher<I>::init() {
   C_SaferCond init_ctx;
   init(&init_ctx);
@@ -983,6 +988,54 @@ void LeaderWatcher<I>::handle_notify_heartbeat(int r) {
 }
 
 template <typename I>
+void LeaderWatcher<I>::notify_sync_request(const std::string &instance_id,
+                                           const std::string &request_id) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  bufferlist bl;
+  ::encode(NotifyMessage{SyncRequestPayload{instance_id, request_id}}, bl);
+
+  send_notify(bl);
+}
+
+template <typename I>
+void LeaderWatcher<I>::notify_sync_request_ack(const std::string &instance_id,
+                                               const std::string &request_id) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  bufferlist bl;
+  ::encode(NotifyMessage{SyncRequestAckPayload{instance_id, request_id}}, bl);
+
+  send_notify(bl);
+}
+
+template <typename I>
+void LeaderWatcher<I>::notify_sync_start(const std::string &instance_id,
+                                           const std::string &request_id) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  bufferlist bl;
+  ::encode(NotifyMessage{SyncStartPayload{instance_id, request_id}}, bl);
+
+  send_notify(bl);
+}
+
+template <typename I>
+void LeaderWatcher<I>::notify_sync_complete(const std::string &instance_id,
+                                            const std::string &request_id) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  bufferlist bl;
+  ::encode(NotifyMessage{SyncCompletePayload{instance_id, request_id}}, bl);
+
+  send_notify(bl);
+}
+
+template <typename I>
 void LeaderWatcher<I>::handle_heartbeat(Context *on_notify_ack) {
   dout(20) << dendl;
 
@@ -1038,6 +1091,50 @@ void LeaderWatcher<I>::handle_lock_released(Context *on_notify_ack) {
 }
 
 template <typename I>
+void LeaderWatcher<I>::handle_sync_request(const std::string &instance_id,
+                                           const std::string &request_id,
+                                           Context *on_notify_ack) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  m_listener->sync_request_handler(instance_id, request_id);
+  on_notify_ack->complete(0);
+}
+
+template <typename I>
+void LeaderWatcher<I>::handle_sync_request_ack(const std::string &instance_id,
+                                               const std::string &request_id,
+                                               Context *on_notify_ack) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  m_listener->sync_request_ack_handler(instance_id, request_id);
+  on_notify_ack->complete(0);
+}
+
+template <typename I>
+void LeaderWatcher<I>::handle_sync_start(const std::string &instance_id,
+                                         const std::string &request_id,
+                                         Context *on_notify_ack) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  m_listener->sync_start_handler(instance_id, request_id);
+  on_notify_ack->complete(0);
+}
+
+template <typename I>
+void LeaderWatcher<I>::handle_sync_complete(const std::string &instance_id,
+                                            const std::string &request_id,
+                                            Context *on_notify_ack) {
+  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
+           << dendl;
+
+  m_listener->sync_complete_handler(instance_id, request_id);
+  on_notify_ack->complete(0);
+}
+
+template <typename I>
 void LeaderWatcher<I>::handle_notify(uint64_t notify_id, uint64_t handle,
                                      uint64_t notifier_id, bufferlist &bl) {
   dout(20) << "notify_id=" << notify_id << ", handle=" << handle << ", "
@@ -1086,6 +1183,39 @@ void LeaderWatcher<I>::handle_payload(const LockReleasedPayload &payload,
   dout(20) << "lock_released" << dendl;
 
   handle_lock_released(on_notify_ack);
+}
+
+template <typename I>
+void LeaderWatcher<I>::handle_payload(const SyncRequestPayload &payload,
+                                      Context *on_notify_ack) {
+  dout(20) << "sync_request" << dendl;
+
+  handle_sync_request(payload.instance_id, payload.request_id, on_notify_ack);
+}
+
+template <typename I>
+void LeaderWatcher<I>::handle_payload(const SyncRequestAckPayload &payload,
+                                      Context *on_notify_ack) {
+  dout(20) << "sync_request_ack" << dendl;
+
+  handle_sync_request_ack(payload.instance_id, payload.request_id,
+                          on_notify_ack);
+}
+
+template <typename I>
+void LeaderWatcher<I>::handle_payload(const SyncStartPayload &payload,
+                                      Context *on_notify_ack) {
+  dout(20) << "sync_start" << dendl;
+
+  handle_sync_start(payload.instance_id, payload.request_id, on_notify_ack);
+}
+
+template <typename I>
+void LeaderWatcher<I>::handle_payload(const SyncCompletePayload &payload,
+                                      Context *on_notify_ack) {
+  dout(20) << "sync_complete" << dendl;
+
+  handle_sync_complete(payload.instance_id, payload.request_id, on_notify_ack);
 }
 
 template <typename I>
