@@ -222,12 +222,10 @@ struct PoolReplayer::C_RefreshLocalImages : public Context {
 
 PoolReplayer::PoolReplayer(Threads<librbd::ImageCtx> *threads,
 			   std::shared_ptr<ImageDeleter> image_deleter,
-			   ImageSyncThrottlerRef<> image_sync_throttler,
 			   int64_t local_pool_id, const peer_t &peer,
 			   const std::vector<const char*> &args) :
   m_threads(threads),
   m_image_deleter(image_deleter),
-  m_image_sync_throttler(image_sync_throttler),
   m_lock(stringify("rbd::mirror::PoolReplayer ") + stringify(peer)),
   m_peer(peer),
   m_args(args),
@@ -317,6 +315,8 @@ int PoolReplayer::init()
   }
 
   dout(20) << "connected to " << m_peer << dendl;
+
+  m_image_sync_throttler.reset(new ImageSyncThrottler<>());
 
   m_instance_replayer.reset(
     InstanceReplayer<>::create(m_threads, m_image_deleter,
@@ -475,6 +475,10 @@ void PoolReplayer::print_status(Formatter *f, stringstream *ss)
     }
     f->close_section();
   }
+
+  f->open_object_section("sync_throttler");
+  m_image_sync_throttler->print_status(f, ss);
+  f->close_section();
 
   m_instance_replayer->print_status(f, ss);
 
