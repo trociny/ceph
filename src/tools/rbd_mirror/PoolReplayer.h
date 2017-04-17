@@ -31,6 +31,7 @@ namespace mirror {
 
 template <typename> struct Threads;
 template <typename> class InstanceReplayer;
+template <typename> class InstanceSyncThrottler;
 template <typename> class InstanceWatcher;
 
 /**
@@ -101,7 +102,6 @@ private:
 
   Threads<librbd::ImageCtx> *m_threads;
   std::shared_ptr<ImageDeleter> m_image_deleter;
-  ImageSyncThrottlerRef<> m_image_sync_throttler;
   mutable Mutex m_lock;
   Cond m_cond;
   atomic_t m_stopping;
@@ -160,6 +160,9 @@ private:
   } m_leader_listener;
 
   std::unique_ptr<LeaderWatcher<> > m_leader_watcher;
+  std::unique_ptr<
+    InstanceSyncThrottler<librbd::ImageCtx>> m_instance_sync_throttler;
+  ImageSyncThrottlerRef<> m_image_sync_throttler;
   std::unique_ptr<InstanceWatcher<librbd::ImageCtx> > m_instance_watcher;
   AsyncOpTracker m_update_op_tracker;
 };

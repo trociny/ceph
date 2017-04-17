@@ -100,6 +100,7 @@ std::vector<MockImageSync *> MockImageSync::instances;
 
 
 // template definitions
+#include "tools/rbd_mirror/InstanceSyncThrottler.cc"
 #include "tools/rbd_mirror/ImageSyncThrottler.cc"
 
 namespace rbd {
@@ -108,6 +109,7 @@ namespace mirror {
 class TestMockImageSyncThrottler : public TestMockFixture {
 public:
   typedef ImageSyncThrottler<librbd::MockTestImageCtx> MockImageSyncThrottler;
+  typedef InstanceSyncThrottler<librbd::MockTestImageCtx> MockInstanceSyncThrottler;
 
   void SetUp() override {
     TestMockFixture::SetUp();
@@ -119,7 +121,9 @@ public:
     ASSERT_EQ(0, create_image(rbd, m_local_io_ctx, m_image_name, m_image_size));
     ASSERT_EQ(0, open_image(m_local_io_ctx, m_image_name, &m_local_image_ctx));
 
-    mock_sync_throttler = new MockImageSyncThrottler();
+    m_mock_instance_sync_throttler = new MockInstanceSyncThrottler();
+    mock_sync_throttler =
+      new MockImageSyncThrottler(m_mock_instance_sync_throttler);
 
     m_mock_local_image_ctx = new librbd::MockTestImageCtx(*m_local_image_ctx);
     m_mock_remote_image_ctx = new librbd::MockTestImageCtx(*m_remote_image_ctx);
@@ -129,6 +133,7 @@ public:
   void TearDown() override {
     MockImageSync::instances.clear();
     delete mock_sync_throttler;
+    delete m_mock_instance_sync_throttler;
     delete m_mock_local_image_ctx;
     delete m_mock_remote_image_ctx;
     delete m_mock_journaler;
@@ -167,6 +172,7 @@ public:
   librbd::MockTestImageCtx *m_mock_remote_image_ctx;
   journal::MockJournaler *m_mock_journaler;
   librbd::journal::MirrorPeerClientMeta m_client_meta;
+  MockInstanceSyncThrottler *m_mock_instance_sync_throttler;
   MockImageSyncThrottler *mock_sync_throttler;
 };
 
@@ -182,7 +188,7 @@ TEST_F(TestMockImageSyncThrottler, Single_Sync) {
 }
 
 TEST_F(TestMockImageSyncThrottler, Multiple_Syncs) {
-  mock_sync_throttler->set_max_concurrent_syncs(2);
+  m_mock_instance_sync_throttler->set_max_concurrent_syncs(2);
 
   C_SaferCond ctx1;
   start_sync("image_id_1", &ctx1);
@@ -245,7 +251,7 @@ TEST_F(TestMockImageSyncThrottler, Cancel_Running_Sync) {
 }
 
 TEST_F(TestMockImageSyncThrottler, Cancel_Waiting_Sync) {
-  mock_sync_throttler->set_max_concurrent_syncs(1);
+  m_mock_instance_sync_throttler->set_max_concurrent_syncs(1);
 
   C_SaferCond ctx1;
   start_sync("image_id_1", &ctx1);
@@ -268,7 +274,7 @@ TEST_F(TestMockImageSyncThrottler, Cancel_Waiting_Sync) {
 }
 
 TEST_F(TestMockImageSyncThrottler, Cancel_Running_Sync_Start_Waiting) {
-  mock_sync_throttler->set_max_concurrent_syncs(1);
+  m_mock_instance_sync_throttler->set_max_concurrent_syncs(1);
 
   C_SaferCond ctx1;
   start_sync("image_id_1", &ctx1);
@@ -292,7 +298,7 @@ TEST_F(TestMockImageSyncThrottler, Cancel_Running_Sync_Start_Waiting) {
 }
 
 TEST_F(TestMockImageSyncThrottler, Increase_Max_Concurrent_Syncs) {
-  mock_sync_throttler->set_max_concurrent_syncs(2);
+  m_mock_instance_sync_throttler->set_max_concurrent_syncs(2);
 
   C_SaferCond ctx1;
   start_sync("image_id_1", &ctx1);
@@ -322,7 +328,7 @@ TEST_F(TestMockImageSyncThrottler, Increase_Max_Concurrent_Syncs) {
   MockImageSync *sync5 = MockImageSync::instances[4];
   ASSERT_FALSE(sync5->syncing);
 
-  mock_sync_throttler->set_max_concurrent_syncs(4);
+  m_mock_instance_sync_throttler->set_max_concurrent_syncs(4);
 
   ASSERT_TRUE(sync3->syncing);
   ASSERT_TRUE(sync4->syncing);
@@ -346,7 +352,7 @@ TEST_F(TestMockImageSyncThrottler, Increase_Max_Concurrent_Syncs) {
 }
 
 TEST_F(TestMockImageSyncThrottler, Decrease_Max_Concurrent_Syncs) {
-  mock_sync_throttler->set_max_concurrent_syncs(4);
+  m_mock_instance_sync_throttler->set_max_concurrent_syncs(4);
 
   C_SaferCond ctx1;
   start_sync("image_id_1", &ctx1);
@@ -376,7 +382,7 @@ TEST_F(TestMockImageSyncThrottler, Decrease_Max_Concurrent_Syncs) {
   MockImageSync *sync5 = MockImageSync::instances[4];
   ASSERT_FALSE(sync5->syncing);
 
-  mock_sync_throttler->set_max_concurrent_syncs(2);
+  m_mock_instance_sync_throttler->set_max_concurrent_syncs(2);
 
   ASSERT_FALSE(sync5->syncing);
 

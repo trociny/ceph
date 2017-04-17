@@ -18,6 +18,7 @@
 #include "librbd/Watcher.h"
 #include "librbd/api/Mirror.h"
 #include "InstanceReplayer.h"
+#include "InstanceSyncThrottler.h"
 #include "InstanceWatcher.h"
 #include "LeaderWatcher.h"
 #include "Threads.h"
@@ -316,7 +317,9 @@ int PoolReplayer::init()
 
   dout(20) << "connected to " << m_peer << dendl;
 
-  m_image_sync_throttler.reset(new ImageSyncThrottler<>());
+  m_instance_sync_throttler.reset(new InstanceSyncThrottler<>());
+  m_image_sync_throttler.reset(
+    new ImageSyncThrottler<>(m_instance_sync_throttler.get()));
 
   m_instance_replayer.reset(
     InstanceReplayer<>::create(m_threads, m_image_deleter,

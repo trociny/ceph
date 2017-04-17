@@ -15,7 +15,6 @@
 #ifndef CEPH_RBD_MIRROR_IMAGE_SYNC_THROTTLER_H
 #define CEPH_RBD_MIRROR_IMAGE_SYNC_THROTTLER_H
 
-#include <list>
 #include <map>
 #include <utility>
 #include "common/Mutex.h"
@@ -23,7 +22,6 @@
 #include "include/Context.h"
 #include "librbd/journal/TypeTraits.h"
 
-class CephContext;
 class Context;
 class ContextWQ;
 class SafeTimer;
@@ -33,7 +31,7 @@ namespace librbd { namespace journal { struct MirrorPeerClientMeta; } }
 namespace rbd {
 namespace mirror {
 
-template <typename> class ImageSync;
+template <typename> class InstanceSyncThrottler;
 
 class ProgressContext;
 
@@ -41,15 +39,15 @@ class ProgressContext;
  * Manage concurrent image-syncs
  */
 template <typename ImageCtxT = librbd::ImageCtx>
-class ImageSyncThrottler : public md_config_obs_t {
+class ImageSyncThrottler {
 public:
 
   typedef librbd::journal::TypeTraits<ImageCtxT> TypeTraits;
   typedef typename TypeTraits::Journaler Journaler;
   typedef librbd::journal::MirrorPeerClientMeta MirrorPeerClientMeta;
 
-  ImageSyncThrottler();
-  ~ImageSyncThrottler() override;
+  ImageSyncThrottler(InstanceSyncThrottler<ImageCtxT> *throttler);
+  ~ImageSyncThrottler();
   ImageSyncThrottler(const ImageSyncThrottler&) = delete;
   ImageSyncThrottler& operator=(const ImageSyncThrottler&) = delete;
 
@@ -62,24 +60,18 @@ public:
 
   void cancel_sync(const std::string &local_image_id);
 
-  void set_max_concurrent_syncs(uint32_t max);
-
   void print_status(Formatter *f, std::stringstream *ss);
 
 private:
   struct C_SyncHolder;
 
-  void handle_sync_finished(C_SyncHolder *sync_holder);
+  void handle_sync_started(int r, C_SyncHolder *sync_holder);
+  void handle_sync_finished(int r, C_SyncHolder *sync_holder);
 
-  const char **get_tracked_conf_keys() const override;
-  void handle_conf_change(const struct md_config_t *conf,
-                          const std::set<std::string> &changed) override;
-
-  uint32_t m_max_concurrent_syncs;
+  InstanceSyncThrottler<ImageCtxT> *m_throttler;
   Mutex m_lock;
-  std::list<C_SyncHolder *> m_sync_queue;
+  std::map<std::string, C_SyncHolder *> m_waiting_syncs;
   std::map<std::string, C_SyncHolder *> m_inflight_syncs;
-
 };
 
 } // namespace mirror
