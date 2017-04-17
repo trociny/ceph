@@ -37,6 +37,7 @@
 #include "tools/rbd_mirror/types.h"
 #include "tools/rbd_mirror/ImageReplayer.h"
 #include "tools/rbd_mirror/ImageSyncThrottler.h"
+#include "tools/rbd_mirror/InstanceSyncThrottler.h"
 #include "tools/rbd_mirror/Threads.h"
 #include "tools/rbd_mirror/ImageDeleter.h"
 
@@ -118,7 +119,9 @@ public:
     m_image_deleter.reset(new rbd::mirror::ImageDeleter(m_threads->work_queue,
                                                         m_threads->timer,
                                                         &m_threads->timer_lock));
-    m_image_sync_throttler.reset(new rbd::mirror::ImageSyncThrottler<>());
+    m_instance_sync_throttler.reset(new rbd::mirror::InstanceSyncThrottler<>());
+    m_image_sync_throttler.reset(
+      new rbd::mirror::ImageSyncThrottler<>(m_instance_sync_throttler.get()));
   }
 
   ~TestImageReplayer() override 
@@ -364,6 +367,8 @@ public:
   std::shared_ptr<rbd::mirror::ImageDeleter> m_image_deleter;
   std::shared_ptr<librados::Rados> m_local_cluster;
   librados::Rados m_remote_cluster;
+  std::shared_ptr<
+    rbd::mirror::InstanceSyncThrottler<>> m_instance_sync_throttler;
   std::shared_ptr<rbd::mirror::ImageSyncThrottler<>> m_image_sync_throttler;
   std::string m_local_mirror_uuid = "local mirror uuid";
   std::string m_remote_mirror_uuid = "remote mirror uuid";

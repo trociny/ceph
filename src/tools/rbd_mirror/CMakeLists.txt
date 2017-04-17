@@ -9,6 +9,7 @@ set(rbd_mirror_internal
   ImageSync.cc
   ImageSyncThrottler.cc
   InstanceReplayer.cc
+  InstanceSyncThrottler.cc
   InstanceWatcher.cc
   Instances.cc
   LeaderWatcher.cc
