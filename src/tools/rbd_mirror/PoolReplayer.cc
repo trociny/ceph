@@ -630,14 +630,15 @@ void PoolReplayer::handle_update(const std::string &mirror_uuid,
 void PoolReplayer::handle_post_acquire_leader(Context *on_finish) {
   dout(20) << dendl;
 
-  m_instance_sync_throttler->handle_leader_acquired();
+  m_instance_watcher->set_instance_sync_throttler(
+    m_instance_sync_throttler.get());
   refresh_local_images(on_finish);
 }
 
 void PoolReplayer::handle_pre_release_leader(Context *on_finish) {
   dout(20) << dendl;
 
-  m_instance_sync_throttler->handle_leader_released();
+  m_instance_watcher->set_instance_sync_throttler(nullptr);
   shut_down_pool_watcher(on_finish);
 }
 
@@ -735,36 +736,10 @@ void PoolReplayer::handle_wait_for_update_ops(int r, Context *on_finish) {
   m_instance_replayer->release_all(on_finish);
 }
 
-void PoolReplayer::handle_sync_request(const std::string &instance_id,
-                                       const std::string &request_id) {
-  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
-           << dendl;
+void PoolReplayer::handle_update_leader(const std::string &leader_instance_id) {
+  dout(20) << "leader_instance_id=" << leader_instance_id << dendl;
 
-  m_instance_sync_throttler->handle_sync_request(instance_id, request_id);
-}
-
-void PoolReplayer::handle_sync_request_ack(const std::string &instance_id,
-                                           const std::string &request_id) {
-  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
-           << dendl;
-
-  m_instance_sync_throttler->handle_sync_request_ack(instance_id, request_id);
-}
-
-void PoolReplayer::handle_sync_start(const std::string &instance_id,
-                                     const std::string &request_id) {
-  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
-           << dendl;
-
-  m_instance_sync_throttler->handle_sync_start(instance_id, request_id);
-}
-
-void PoolReplayer::handle_sync_complete(const std::string &instance_id,
-                                        const std::string &request_id) {
-  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
-           << dendl;
-
-  m_instance_sync_throttler->handle_sync_complete(instance_id, request_id);
+  m_instance_watcher->handle_update_leader(leader_instance_id);
 }
 
 } // namespace mirror

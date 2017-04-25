@@ -557,8 +557,10 @@ void LeaderWatcher<I>::handle_get_locker(int r,
     return;
   }
 
+  bool notify_listener = false;
   if (m_locker != locker) {
     m_locker = locker;
+    notify_listener = true;
     if (m_acquire_attempts > 1) {
       dout(10) << "new lock owner detected -- resetting heartbeat counter"
                << dendl;
@@ -571,10 +573,25 @@ void LeaderWatcher<I>::handle_get_locker(int r,
     dout(0) << "breaking leader lock after " << m_acquire_attempts << " "
             << "failed attempts to acquire" << dendl;
     break_leader_lock();
-  } else {
-    schedule_acquire_leader_lock(1);
-    m_timer_op_tracker.finish_op();
+    return;
   }
+
+  schedule_acquire_leader_lock(1);
+
+  if (!notify_listener) {
+    m_timer_op_tracker.finish_op();
+    return;
+  }
+
+  auto ctx = new FunctionContext(
+    [this](int r) {
+      std::string instance_id;
+      if (get_leader_instance_id(&instance_id)) {
+        m_listener->update_leader_handler(instance_id);
+      }
+      m_timer_op_tracker.finish_op();
+    });
+  m_work_queue->queue(ctx, 0);
 }
 
 template <typename I>
@@ -1087,50 +1104,6 @@ void LeaderWatcher<I>::handle_lock_released(Context *on_notify_ack) {
     }
   }
 
-  on_notify_ack->complete(0);
-}
-
-template <typename I>
-void LeaderWatcher<I>::handle_sync_request(const std::string &instance_id,
-                                           const std::string &request_id,
-                                           Context *on_notify_ack) {
-  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
-           << dendl;
-
-  m_listener->sync_request_handler(instance_id, request_id);
-  on_notify_ack->complete(0);
-}
-
-template <typename I>
-void LeaderWatcher<I>::handle_sync_request_ack(const std::string &instance_id,
-                                               const std::string &request_id,
-                                               Context *on_notify_ack) {
-  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
-           << dendl;
-
-  m_listener->sync_request_ack_handler(instance_id, request_id);
-  on_notify_ack->complete(0);
-}
-
-template <typename I>
-void LeaderWatcher<I>::handle_sync_start(const std::string &instance_id,
-                                         const std::string &request_id,
-                                         Context *on_notify_ack) {
-  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
-           << dendl;
-
-  m_listener->sync_start_handler(instance_id, request_id);
-  on_notify_ack->complete(0);
-}
-
-template <typename I>
-void LeaderWatcher<I>::handle_sync_complete(const std::string &instance_id,
-                                            const std::string &request_id,
-                                            Context *on_notify_ack) {
-  dout(20) << "instance_id=" << instance_id << ", request_id=" << request_id
-           << dendl;
-
-  m_listener->sync_complete_handler(instance_id, request_id);
   on_notify_ack->complete(0);
 }
 

@@ -19,10 +19,6 @@ enum NotifyOp {
   NOTIFY_OP_HEARTBEAT        = 0,
   NOTIFY_OP_LOCK_ACQUIRED    = 1,
   NOTIFY_OP_LOCK_RELEASED    = 2,
-  NOTIFY_OP_SYNC_REQUEST     = 3,
-  NOTIFY_OP_SYNC_REQUEST_ACK = 4,
-  NOTIFY_OP_SYNC_START       = 5,
-  NOTIFY_OP_SYNC_COMPLETE    = 6,
 };
 
 struct HeartbeatPayload {
@@ -58,70 +54,6 @@ struct LockReleasedPayload {
   void dump(Formatter *f) const;
 };
 
-struct SyncPayloadBase {
-  std::string instance_id;
-  std::string request_id;
-
-  SyncPayloadBase() {
-  }
-
-  SyncPayloadBase(const std::string &instance_id, const std::string &request_id)
-    : instance_id(instance_id), request_id(request_id) {
-  }
-
-  void encode(bufferlist &bl) const;
-  void decode(__u8 version, bufferlist::iterator &iter);
-  void dump(Formatter *f) const;
-};
-
-struct SyncRequestPayload : public SyncPayloadBase {
-  static const NotifyOp NOTIFY_OP = NOTIFY_OP_SYNC_REQUEST;
-
-  SyncRequestPayload() : SyncPayloadBase() {
-  }
-
-  SyncRequestPayload(const std::string &instance_id,
-                     const std::string &request_id)
-    : SyncPayloadBase(instance_id, request_id) {
-  }
-};
-
-struct SyncRequestAckPayload : public SyncPayloadBase {
-  static const NotifyOp NOTIFY_OP = NOTIFY_OP_SYNC_REQUEST_ACK;
-
-  SyncRequestAckPayload() : SyncPayloadBase() {
-  }
-
-  SyncRequestAckPayload(const std::string &instance_id,
-                        const std::string &request_id)
-    : SyncPayloadBase(instance_id, request_id) {
-  }
-};
-
-struct SyncStartPayload : public SyncPayloadBase {
-  static const NotifyOp NOTIFY_OP = NOTIFY_OP_SYNC_START;
-
-  SyncStartPayload() : SyncPayloadBase() {
-  }
-
-  SyncStartPayload(const std::string &instance_id,
-                   const std::string &request_id)
-    : SyncPayloadBase(instance_id, request_id) {
-  }
-};
-
-struct SyncCompletePayload : public SyncPayloadBase {
-  static const NotifyOp NOTIFY_OP = NOTIFY_OP_SYNC_COMPLETE;
-
-  SyncCompletePayload() : SyncPayloadBase() {
-  }
-
-  SyncCompletePayload(const std::string &instance_id,
-                      const std::string &request_id)
-    : SyncPayloadBase(instance_id, request_id) {
-  }
-};
-
 struct UnknownPayload {
   static const NotifyOp NOTIFY_OP = static_cast<NotifyOp>(-1);
 
@@ -136,10 +68,6 @@ struct UnknownPayload {
 typedef boost::variant<HeartbeatPayload,
                        LockAcquiredPayload,
                        LockReleasedPayload,
-                       SyncRequestPayload,
-                       SyncRequestAckPayload,
-                       SyncStartPayload,
-                       SyncCompletePayload,
                        UnknownPayload> Payload;
 
 struct NotifyMessage {

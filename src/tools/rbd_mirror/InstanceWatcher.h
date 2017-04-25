@@ -72,7 +72,14 @@ public:
                             const std::string &peer_image_id,
 			    bool schedule_delete, Context *on_notify_ack);
 
+  void notify_start_sync(const std::string &request_id,
+                         Context *on_notify_ack);
+  bool notify_cancel_sync(const std::string &request_id);
+  void notify_finish_sync(const std::string &request_id);
+
   void cancel_notify_requests(const std::string &instance_id);
+
+  void handle_update_leader(const std::string &leader_instance_id);
 
 private:
   /**
@@ -151,6 +158,9 @@ private:
   librbd::managed_lock::Locker m_instance_locker;
   std::set<std::pair<std::string, C_NotifyInstanceRequest *>> m_notify_ops;
   AsyncOpTracker m_notify_op_tracker;
+  std::set<C_NotifyInstanceRequest *> m_suspended_ops;
+  std::map<std::string, C_NotifyInstanceRequest *> m_pending_sync_requests;
+  std::set<std::pair<std::string, std::string>> m_remote_sync_requests;
   uint64_t m_request_seq = 0;
   std::set<Request> m_requests;
 
@@ -187,6 +197,10 @@ private:
   void break_instance_lock();
   void handle_break_instance_lock(int r);
 
+  void suspend_notify_request(C_NotifyInstanceRequest *req);
+  bool unsuspend_notify_request(C_NotifyInstanceRequest *req);
+  void unsuspend_notify_requests();
+
   Context *prepare_request(const std::string &instance_id, uint64_t request_id,
                            C_NotifyAck *on_notify_ack);
 
@@ -207,6 +221,12 @@ private:
                       C_NotifyAck *on_notify_ack);
   void handle_payload(const std::string &instance_id,
                       const instance_watcher::ImageReleasePayload &payload,
+                      C_NotifyAck *on_notify_ack);
+  void handle_payload(const std::string &instance_id,
+                      const leader_watcher::SyncStartPayload &payload,
+                      C_NotifyAck *on_notify_ack);
+  void handle_payload(const std::string &instance_id,
+                      const leader_watcher::SyncCompletePayload &payload,
                       C_NotifyAck *on_notify_ack);
   void handle_payload(const std::string &instance_id,
                       const instance_watcher::UnknownPayload &payload,

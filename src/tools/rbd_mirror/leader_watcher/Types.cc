@@ -85,21 +85,6 @@ void LockReleasedPayload::decode(__u8 version, bufferlist::iterator &iter) {
 void LockReleasedPayload::dump(Formatter *f) const {
 }
 
-void SyncPayloadBase::encode(bufferlist &bl) const {
-  ::encode(instance_id, bl);
-  ::encode(request_id, bl);
-}
-
-void SyncPayloadBase::decode(__u8 version, bufferlist::iterator &iter) {
-  ::decode(instance_id, iter);
-  ::decode(request_id, iter);
-}
-
-void SyncPayloadBase::dump(Formatter *f) const {
-  f->dump_string("instance_id", request_id);
-  f->dump_string("request_id", request_id);
-}
-
 void UnknownPayload::encode(bufferlist &bl) const {
   assert(false);
 }
@@ -162,18 +147,6 @@ void NotifyMessage::generate_test_instances(std::list<NotifyMessage *> &o) {
   o.push_back(new NotifyMessage(HeartbeatPayload()));
   o.push_back(new NotifyMessage(LockAcquiredPayload()));
   o.push_back(new NotifyMessage(LockReleasedPayload()));
-
-  o.push_back(new NotifyMessage(SyncRequestPayload()));
-  o.push_back(new NotifyMessage(SyncRequestPayload("instance_id", "id")));
-
-  o.push_back(new NotifyMessage(SyncRequestAckPayload()));
-  o.push_back(new NotifyMessage(SyncRequestAckPayload("instance_id", "id")));
-
-  o.push_back(new NotifyMessage(SyncStartPayload()));
-  o.push_back(new NotifyMessage(SyncStartPayload("instance_id", "id")));
-
-  o.push_back(new NotifyMessage(SyncCompletePayload()));
-  o.push_back(new NotifyMessage(SyncCompletePayload("instance_id", "id")));
 }
 
 std::ostream &operator<<(std::ostream &out, const NotifyOp &op) {
