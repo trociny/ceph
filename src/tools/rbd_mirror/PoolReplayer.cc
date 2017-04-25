@@ -482,7 +482,7 @@ void PoolReplayer::print_status(Formatter *f, stringstream *ss)
   }
 
   f->open_object_section("sync_throttler");
-  m_image_sync_throttler->print_status(f, ss);
+  m_instance_sync_throttler->print_status(f, ss);
   f->close_section();
 
   m_instance_replayer->print_status(f, ss);

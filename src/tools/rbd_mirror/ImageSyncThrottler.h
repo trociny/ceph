@@ -60,8 +60,6 @@ public:
 
   void cancel_sync(const std::string &local_image_id);
 
-  void print_status(Formatter *f, std::stringstream *ss);
-
 private:
   struct C_SyncHolder;
 

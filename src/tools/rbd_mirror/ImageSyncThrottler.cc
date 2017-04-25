@@ -155,11 +155,6 @@ void ImageSyncThrottler<I>::handle_sync_finished(int r,
   assert(resut > 0);
 }
 
-template <typename I>
-void ImageSyncThrottler<I>::print_status(Formatter *f, stringstream *ss) {
-  m_throttler->print_status(f, ss);
-}
-
 } // namespace mirror
 } // namespace rbd
 
