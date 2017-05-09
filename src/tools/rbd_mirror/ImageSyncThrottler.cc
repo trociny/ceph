@@ -14,7 +14,7 @@
 
 #include "ImageSyncThrottler.h"
 #include "ImageSync.h"
-#include "InstanceSyncThrottler.h"
+#include "InstanceWatcher.h"
 #include "common/ceph_context.h"
 #include "librbd/Utils.h"
 
@@ -45,9 +45,8 @@ struct ImageSyncThrottler<ImageCtxT>::C_SyncHolder : public Context {
 };
 
 template <typename I>
-ImageSyncThrottler<I>::ImageSyncThrottler(InstanceSyncThrottler<I> *throttler)
-  : m_throttler(throttler),
-    m_lock(librbd::util::unique_lock_name("rbd::mirror::ImageSyncThrottler",
+ImageSyncThrottler<I>::ImageSyncThrottler()
+  : m_lock(librbd::util::unique_lock_name("rbd::mirror::ImageSyncThrottler",
                                           this)) {
 }
 
@@ -56,6 +55,16 @@ ImageSyncThrottler<I>::~ImageSyncThrottler() {
   Mutex::Locker locker(m_lock);
   assert(m_waiting_syncs.empty());
   assert(m_inflight_syncs.empty());
+}
+
+template <typename I>
+void ImageSyncThrottler<I>::init(InstanceWatcher<I> *instance_watcher) {
+  dout(20) << "instance_watcher=" << instance_watcher << dendl;
+
+  Mutex::Locker locker(m_lock);
+  assert(m_instance_watcher == nullptr);
+
+  m_instance_watcher = instance_watcher;
 }
 
 template <typename I>
@@ -87,14 +96,15 @@ void ImageSyncThrottler<I>::start_sync(I *local_image_ctx, I *remote_image_ctx,
     [this, sync_holder_ctx] (int r) {
       handle_sync_started(r, sync_holder_ctx);
     });
-  m_throttler->start_op(local_image_ctx->id, on_start);
+
+  m_instance_watcher->notify_start_sync(local_image_ctx->id, on_start);
 }
 
 template <typename I>
 void ImageSyncThrottler<I>::cancel_sync(const std::string &local_image_id) {
   dout(20) << "local_image_id=" << local_image_id << dendl;
 
-  if (m_throttler->cancel_op(local_image_id)) {
+  if (m_instance_watcher->notify_cancel_sync(local_image_id)) {
     return;
   }
 
@@ -113,6 +123,11 @@ void ImageSyncThrottler<I>::cancel_sync(const std::string &local_image_id) {
              << sync_holder->m_local_image_id << dendl;
     sync_holder->m_sync->cancel();
   }
+}
+
+template <typename I>
+void ImageSyncThrottler<I>::print_status(Formatter *f, stringstream *ss) {
+  m_instance_watcher->print_sync_status(f, ss);
 }
 
 template <typename I>
@@ -149,7 +164,7 @@ void ImageSyncThrottler<I>::handle_sync_finished(int r,
            << dendl;
 
   sync_holder->m_on_finish->complete(r);
-  m_throttler->finish_op(sync_holder->m_local_image_id);
+  m_instance_watcher->notify_finish_sync(sync_holder->m_local_image_id);
   Mutex::Locker locker(m_lock);
   auto resut = m_inflight_syncs.erase(sync_holder->m_local_image_id);
   assert(resut > 0);

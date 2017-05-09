@@ -31,7 +31,6 @@ namespace mirror {
 
 template <typename> struct Threads;
 template <typename> class InstanceReplayer;
-template <typename> class InstanceSyncThrottler;
 template <typename> class InstanceWatcher;
 
 /**
@@ -100,6 +99,8 @@ private:
   void wait_for_update_ops(Context *on_finish);
   void handle_wait_for_update_ops(int r, Context *on_finish);
 
+  void handle_update_leader(const std::string &leader_instance_id);
+
   Threads<librbd::ImageCtx> *m_threads;
   std::shared_ptr<ImageDeleter> m_image_deleter;
   mutable Mutex m_lock;
@@ -158,13 +159,16 @@ private:
       m_pool_replayer->handle_pre_release_leader(on_finish);
     }
 
+    void update_leader_handler(
+      const std::string &leader_instance_id) override {
+      m_pool_replayer->handle_update_leader(leader_instance_id);
+    }
+
   private:
     PoolReplayer *m_pool_replayer;
   } m_leader_listener;
 
   std::unique_ptr<LeaderWatcher<> > m_leader_watcher;
-  std::unique_ptr<
-    InstanceSyncThrottler<librbd::ImageCtx>> m_instance_sync_throttler;
   ImageSyncThrottlerRef<> m_image_sync_throttler;
   std::unique_ptr<InstanceWatcher<librbd::ImageCtx> > m_instance_watcher;
   AsyncOpTracker m_update_op_tracker;

@@ -31,7 +31,7 @@ namespace librbd { namespace journal { struct MirrorPeerClientMeta; } }
 namespace rbd {
 namespace mirror {
 
-template <typename> class InstanceSyncThrottler;
+template <typename> class InstanceWatcher;
 
 class ProgressContext;
 
@@ -46,10 +46,12 @@ public:
   typedef typename TypeTraits::Journaler Journaler;
   typedef librbd::journal::MirrorPeerClientMeta MirrorPeerClientMeta;
 
-  ImageSyncThrottler(InstanceSyncThrottler<ImageCtxT> *throttler);
+  ImageSyncThrottler();
   ~ImageSyncThrottler();
   ImageSyncThrottler(const ImageSyncThrottler&) = delete;
   ImageSyncThrottler& operator=(const ImageSyncThrottler&) = delete;
+
+  void init(InstanceWatcher<ImageCtxT> *instance_watcher);
 
   void start_sync(ImageCtxT *local_image_ctx,
                   ImageCtxT *remote_image_ctx, SafeTimer *timer,
@@ -60,13 +62,15 @@ public:
 
   void cancel_sync(const std::string &local_image_id);
 
+  void print_status(Formatter *f, std::stringstream *ss);
+
 private:
   struct C_SyncHolder;
 
   void handle_sync_started(int r, C_SyncHolder *sync_holder);
   void handle_sync_finished(int r, C_SyncHolder *sync_holder);
 
-  InstanceSyncThrottler<ImageCtxT> *m_throttler;
+  InstanceWatcher<ImageCtxT> *m_instance_watcher = nullptr;
   Mutex m_lock;
   std::map<std::string, C_SyncHolder *> m_waiting_syncs;
   std::map<std::string, C_SyncHolder *> m_inflight_syncs;

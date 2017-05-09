@@ -24,6 +24,13 @@ namespace mirror {
 template <typename ImageCtxT = librbd::ImageCtx>
 class InstanceSyncThrottler : public md_config_obs_t {
 public:
+  static InstanceSyncThrottler *create() {
+    return new InstanceSyncThrottler();
+  }
+  void destroy() {
+    delete this;
+  }
+
   InstanceSyncThrottler();
   ~InstanceSyncThrottler() override;
 

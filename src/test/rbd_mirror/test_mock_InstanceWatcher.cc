@@ -9,6 +9,7 @@
 #include "test/librbd/mock/MockImageCtx.h"
 #include "test/rbd_mirror/test_mock_fixture.h"
 #include "tools/rbd_mirror/InstanceReplayer.h"
+#include "tools/rbd_mirror/InstanceSyncThrottler.h"
 #include "tools/rbd_mirror/InstanceWatcher.h"
 #include "tools/rbd_mirror/Threads.h"
 
@@ -80,6 +81,33 @@ struct InstanceReplayer<librbd::MockTestImageCtx> {
   MOCK_METHOD5(release_image, void(const std::string &, const std::string &,
                                    const std::string &, bool, Context *));
 };
+
+template <>
+struct InstanceSyncThrottler<librbd::MockTestImageCtx> {
+  static InstanceSyncThrottler* s_instance;
+
+  static InstanceSyncThrottler *create() {
+    assert(s_instance != nullptr);
+    return s_instance;
+  }
+
+  InstanceSyncThrottler() {
+    assert(s_instance == nullptr);
+    s_instance = this;
+  }
+
+  virtual ~InstanceSyncThrottler() {
+    assert(s_instance == this);
+    s_instance = nullptr;
+  }
+
+  MOCK_METHOD0(destroy, void());
+  MOCK_METHOD2(start_op, void(const std::string &, Context *));
+  MOCK_METHOD1(cancel_op, bool(const std::string &));
+  MOCK_METHOD1(finish_op, void(const std::string &));
+};
+
+InstanceSyncThrottler<librbd::MockTestImageCtx>* InstanceSyncThrottler<librbd::MockTestImageCtx>::s_instance = nullptr;
 
 } // namespace mirror
 } // namespace rbd
@@ -453,6 +481,328 @@ TEST_F(TestMockInstanceWatcher, ImageAcquireReleaseCancel) {
 
   expect_destroy_lock(mock_managed_lock);
   delete instance_watcher;
+}
+
+class TestMockInstanceWatcher_NotifySync : public TestMockInstanceWatcher {
+public:
+  typedef InstanceSyncThrottler<librbd::MockTestImageCtx> MockInstanceSyncThrottler;
+
+  MockManagedLock mock_managed_lock;
+  MockInstanceSyncThrottler mock_instance_sync_throttler;
+  std::string instance_id1;
+  std::string instance_id2;
+
+  librados::Rados cluster;
+  librados::IoCtx io_ctx2;
+
+  MockInstanceWatcher *instance_watcher1;
+  MockInstanceWatcher *instance_watcher2;
+
+  void SetUp() override {
+    TestMockInstanceWatcher::SetUp();
+
+    instance_id1 = m_instance_id;
+    librados::IoCtx& io_ctx1 = m_local_io_ctx;
+    librados::MockTestMemIoCtxImpl &mock_io_ctx1(get_mock_io_ctx(io_ctx1));
+    instance_watcher1 = MockInstanceWatcher::create(io_ctx1,
+                                                    m_mock_threads->work_queue,
+                                                    nullptr);
+    EXPECT_EQ("", connect_cluster_pp(cluster));
+    EXPECT_EQ(0, cluster.ioctx_create(_local_pool_name.c_str(), io_ctx2));
+    instance_id2 = stringify(io_ctx2.get_instance_id());
+    librados::MockTestMemIoCtxImpl &mock_io_ctx2(get_mock_io_ctx(io_ctx2));
+    instance_watcher2 = MockInstanceWatcher::create(io_ctx2,
+                                                    m_mock_threads->work_queue,
+                                                    nullptr);
+    InSequence seq;
+
+    // Init instance watcher 1 (leader)
+    expect_register_instance(mock_io_ctx1, 0);
+    expect_register_watch(mock_io_ctx1, instance_id1);
+    expect_acquire_lock(mock_managed_lock, 0);
+    EXPECT_EQ(0, instance_watcher1->init());
+    instance_watcher1->handle_acquire_leader();
+
+    // Init instance watcher 2
+    expect_register_instance(mock_io_ctx2, 0);
+    expect_register_watch(mock_io_ctx2, instance_id2);
+    expect_acquire_lock(mock_managed_lock, 0);
+    EXPECT_EQ(0, instance_watcher2->init());
+    instance_watcher2->handle_update_leader(instance_id1);
+  }
+
+  void TearDown() override {
+    librados::IoCtx& io_ctx1 = m_local_io_ctx;
+    librados::MockTestMemIoCtxImpl &mock_io_ctx1(get_mock_io_ctx(io_ctx1));
+    librados::MockTestMemIoCtxImpl &mock_io_ctx2(get_mock_io_ctx(io_ctx2));
+
+    InSequence seq;
+
+    EXPECT_CALL(mock_instance_sync_throttler, destroy());
+    instance_watcher1->handle_release_leader();
+
+    // Shutdown instance watcher 1
+    expect_release_lock(mock_managed_lock, 0);
+    expect_unregister_watch(mock_io_ctx1);
+    expect_unregister_instance(mock_io_ctx1, 0);
+    instance_watcher1->shut_down();
+
+    expect_destroy_lock(mock_managed_lock);
+    delete instance_watcher1;
+
+    // Shutdown instance watcher 2
+    expect_release_lock(mock_managed_lock, 0);
+    expect_unregister_watch(mock_io_ctx2);
+    expect_unregister_instance(mock_io_ctx2, 0);
+    instance_watcher2->shut_down();
+
+    expect_destroy_lock(mock_managed_lock);
+    delete instance_watcher2;
+
+    TestMockInstanceWatcher::TearDown();
+  }
+
+  void expect_instance_sync_throttler_start_op(
+    const std::string &sync_id, Context *on_call = nullptr,
+    Context **on_start_ctx = nullptr) {
+    EXPECT_CALL(mock_instance_sync_throttler, start_op(sync_id, _))
+        .WillOnce(Invoke([on_call, on_start_ctx] (const std::string &,
+                                                  Context *ctx) {
+                           if (on_call != nullptr) {
+                             on_call->complete(0);
+                           }
+                           if (on_start_ctx != nullptr) {
+                             *on_start_ctx = ctx;
+                           } else {
+                             ctx->complete(0);
+                           }
+                         }));
+  }
+
+  void expect_remote_instance_sync_throttler_finish_op(
+    const std::string &sync_id, Context *on_finish) {
+    EXPECT_CALL(mock_instance_sync_throttler, cancel_op(sync_id))
+        .WillOnce(Return(false));
+    EXPECT_CALL(mock_instance_sync_throttler, finish_op("sync_id"))
+        .WillOnce(Invoke([on_finish](const std::string &) {
+              on_finish->complete(0);
+            }));
+  }
+};
+
+TEST_F(TestMockInstanceWatcher_NotifySync, StartStopOnLeader) {
+  InSequence seq;
+
+  expect_instance_sync_throttler_start_op("sync_id");
+  C_SaferCond on_start;
+  instance_watcher1->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start.wait());
+
+  EXPECT_CALL(mock_instance_sync_throttler, finish_op("sync_id"));
+  instance_watcher1->notify_finish_sync("sync_id");
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, CancelStartedOnLeader) {
+  InSequence seq;
+
+  expect_instance_sync_throttler_start_op("sync_id");
+  C_SaferCond on_start;
+  instance_watcher1->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start.wait());
+
+  EXPECT_CALL(mock_instance_sync_throttler, cancel_op("sync_id"))
+      .WillOnce(Return(false));
+  ASSERT_FALSE(instance_watcher1->notify_cancel_sync("sync_id"));
+
+  EXPECT_CALL(mock_instance_sync_throttler, finish_op("sync_id"));
+  instance_watcher1->notify_finish_sync("sync_id");
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, StartStopOnNonLeader) {
+  InSequence seq;
+
+  expect_instance_sync_throttler_start_op("sync_id");
+  C_SaferCond on_start;
+  instance_watcher2->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start.wait());
+
+  C_SaferCond on_finish;
+  expect_remote_instance_sync_throttler_finish_op("sync_id", &on_finish);
+  instance_watcher2->notify_finish_sync("sync_id");
+  ASSERT_EQ(0, on_finish.wait());
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, CancelStartedOnNonLeader) {
+  InSequence seq;
+
+  expect_instance_sync_throttler_start_op("sync_id");
+  C_SaferCond on_start;
+  instance_watcher2->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start.wait());
+
+  ASSERT_FALSE(instance_watcher2->notify_cancel_sync("sync_id"));
+
+  C_SaferCond on_finish;
+  expect_remote_instance_sync_throttler_finish_op("sync_id", &on_finish);
+  instance_watcher2->notify_finish_sync("sync_id");
+  ASSERT_EQ(0, on_finish.wait());
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, CancelWaitingOnNonLeader) {
+  InSequence seq;
+
+  C_SaferCond on_start_op_called;
+  Context *on_start_ctx;
+  expect_instance_sync_throttler_start_op("sync_id", &on_start_op_called,
+                                          &on_start_ctx);
+  C_SaferCond on_start;
+  instance_watcher2->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start_op_called.wait());
+
+  C_SaferCond on_cancel_cond;
+  EXPECT_CALL(mock_instance_sync_throttler, cancel_op("sync_id"))
+      .WillOnce(Invoke([&on_cancel_cond] (const std::string &) {
+            on_cancel_cond.complete(0);
+            return true;
+          }));
+  ASSERT_TRUE(instance_watcher2->notify_cancel_sync("sync_id"));
+  // emulate watcher timeout
+  on_start_ctx->complete(-ETIMEDOUT);
+  ASSERT_EQ(-ECANCELED, on_start.wait());
+  ASSERT_EQ(0, on_cancel_cond.wait());
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, InFlightPrevNotification) {
+  // start/cancel sync when previous notification is still in flight
+
+  InSequence seq;
+
+  expect_instance_sync_throttler_start_op("sync_id");
+  C_SaferCond on_start1;
+  instance_watcher2->notify_start_sync("sync_id", &on_start1);
+  ASSERT_EQ(0, on_start1.wait());
+
+  C_SaferCond on_start2;
+  EXPECT_CALL(mock_instance_sync_throttler, cancel_op("sync_id"))
+      .WillOnce(Return(false));
+  EXPECT_CALL(mock_instance_sync_throttler, finish_op("sync_id"))
+      .WillOnce(Invoke([this, &on_start2](const std::string &) {
+            instance_watcher2->notify_start_sync("sync_id", &on_start2);
+            ASSERT_TRUE(instance_watcher2->notify_cancel_sync("sync_id"));
+          }));
+  instance_watcher2->notify_finish_sync("sync_id");
+  ASSERT_EQ(-ECANCELED, on_start2.wait());
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, NoInFlightReleaseAcquireLeader) {
+  InSequence seq;
+
+  EXPECT_CALL(mock_instance_sync_throttler, destroy());
+  instance_watcher1->handle_release_leader();
+  instance_watcher1->handle_acquire_leader();
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, StartedLocalReleaseLeader) {
+  InSequence seq;
+
+  expect_instance_sync_throttler_start_op("sync_id");
+  C_SaferCond on_start;
+  instance_watcher1->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start.wait());
+  EXPECT_CALL(mock_instance_sync_throttler, cancel_op("sync_id"))
+      .WillOnce(Return(false));
+  EXPECT_CALL(mock_instance_sync_throttler, destroy());
+  instance_watcher1->handle_release_leader();
+  instance_watcher1->notify_finish_sync("sync_id");
+
+  instance_watcher1->handle_acquire_leader();
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, WaitingLocalReleaseLeader) {
+  InSequence seq;
+
+  C_SaferCond on_start_op_called;
+  Context *on_start_ctx;
+  expect_instance_sync_throttler_start_op("sync_id", &on_start_op_called,
+                                          &on_start_ctx);
+  C_SaferCond on_start;
+  instance_watcher1->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start_op_called.wait());
+
+  EXPECT_CALL(mock_instance_sync_throttler, cancel_op("sync_id"))
+      .WillOnce(Invoke([on_start_ctx] (const std::string &) {
+            on_start_ctx->complete(-ECANCELED);
+            return true;
+          }));
+  EXPECT_CALL(mock_instance_sync_throttler, destroy());
+  instance_watcher1->handle_release_leader();
+  instance_watcher2->handle_acquire_leader();
+  instance_watcher1->handle_update_leader(instance_id2);
+
+  expect_instance_sync_throttler_start_op("sync_id");
+  ASSERT_EQ(0, on_start.wait());
+  C_SaferCond on_finish;
+  expect_remote_instance_sync_throttler_finish_op("sync_id", &on_finish);
+  instance_watcher1->notify_finish_sync("sync_id");
+  ASSERT_EQ(0, on_finish.wait());
+
+  EXPECT_CALL(mock_instance_sync_throttler, destroy());
+  instance_watcher2->handle_release_leader();
+  instance_watcher1->handle_acquire_leader();
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, StartedRemoteAcquireLeader) {
+  InSequence seq;
+
+  expect_instance_sync_throttler_start_op("sync_id");
+  C_SaferCond on_start;
+  instance_watcher2->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start.wait());
+  EXPECT_CALL(mock_instance_sync_throttler, cancel_op("sync_id"))
+      .WillOnce(Return(false));
+  EXPECT_CALL(mock_instance_sync_throttler, destroy());
+  instance_watcher1->handle_release_leader();
+
+  instance_watcher2->handle_acquire_leader();
+  instance_watcher1->handle_update_leader(instance_id2);
+  instance_watcher2->notify_finish_sync("sync_id");
+
+  EXPECT_CALL(mock_instance_sync_throttler, destroy());
+  instance_watcher2->handle_release_leader();
+  instance_watcher1->handle_acquire_leader();
+}
+
+TEST_F(TestMockInstanceWatcher_NotifySync, WaitingRemoteAcquireLeader) {
+  InSequence seq;
+
+  C_SaferCond on_start_op_called;
+  Context *on_start_ctx;
+  expect_instance_sync_throttler_start_op("sync_id", &on_start_op_called,
+                                          &on_start_ctx);
+  C_SaferCond on_start;
+  instance_watcher2->notify_start_sync("sync_id", &on_start);
+  ASSERT_EQ(0, on_start_op_called.wait());
+
+  EXPECT_CALL(mock_instance_sync_throttler, cancel_op("sync_id"))
+      .WillOnce(Invoke([on_start_ctx] (const std::string &) {
+            on_start_ctx->complete(-ECANCELED);
+            return true;
+          }));
+  EXPECT_CALL(mock_instance_sync_throttler, destroy());
+  instance_watcher1->handle_release_leader();
+
+  EXPECT_CALL(mock_instance_sync_throttler, start_op("sync_id", _))
+      .WillOnce(WithArg<1>(CompleteContext(0)));
+  instance_watcher2->handle_acquire_leader();
+  instance_watcher1->handle_update_leader(instance_id2);
+
+  ASSERT_EQ(0, on_start.wait());
+  EXPECT_CALL(mock_instance_sync_throttler, finish_op("sync_id"));
+  instance_watcher2->notify_finish_sync("sync_id");
+
+  EXPECT_CALL(mock_instance_sync_throttler, destroy());
+  instance_watcher2->handle_release_leader();
+  instance_watcher1->handle_acquire_leader();
 }
 
 } // namespace mirror
