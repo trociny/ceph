@@ -264,9 +264,9 @@ struct InstanceWatcher<I>::C_SyncRequest : public Context {
              << r << dendl;
 
     if (on_start != nullptr) {
-      instance_watcher->handle_notify_start_sync(this, r);
+      instance_watcher->handle_notify_sync_start(this, r);
     } else {
-      instance_watcher->handle_notify_complete_sync(this, r);
+      instance_watcher->handle_notify_sync_complete(this, r);
       delete this;
     }
   }
@@ -445,7 +445,7 @@ void InstanceWatcher<I>::notify_image_release(
 }
 
 template <typename I>
-void InstanceWatcher<I>::notify_start_sync(const std::string &sync_id,
+void InstanceWatcher<I>::notify_sync_start(const std::string &sync_id,
                                            Context *on_notify_ack) {
   dout(20) << "sync_id=" << sync_id << dendl;
 
@@ -480,7 +480,7 @@ void InstanceWatcher<I>::send_sync_start(const std::string &sync_id,
     return;
   }
 
-  // This should only be possible when notify_finish_sync for the
+  // This should only be possible when notify_sync_finish for the
   // same sync_id has been called and returned but the leader
   // notification is still in progress. Wait for it to complete
   // before proceed with this request.
@@ -493,14 +493,14 @@ void InstanceWatcher<I>::send_sync_start(const std::string &sync_id,
         on_start->complete(-ECANCELED);
         return;
       }
-      notify_start_sync(sync_id, on_start);
+      notify_sync_start(sync_id, on_start);
     });
   dout(20) << "sync_id=" << sync_id
            << ": delaying until previous sync notification complete" << dendl;
 }
 
 template <typename I>
-bool InstanceWatcher<I>::notify_cancel_sync(const std::string &sync_id) {
+bool InstanceWatcher<I>::notify_sync_cancel(const std::string &sync_id) {
   dout(20) << "sync_id=" << sync_id << dendl;
 
   Mutex::Locker locker(m_lock);
@@ -532,7 +532,7 @@ bool InstanceWatcher<I>::notify_cancel_sync(const std::string &sync_id) {
 }
 
 template <typename I>
-void InstanceWatcher<I>::notify_finish_sync(const std::string &sync_id) {
+void InstanceWatcher<I>::notify_sync_finish(const std::string &sync_id) {
   dout(20) << "sync_id=" << sync_id << dendl;
 
   Mutex::Locker locker(m_lock);
@@ -564,7 +564,7 @@ void InstanceWatcher<I>::notify_finish_sync(const std::string &sync_id) {
 }
 
 template <typename I>
-void InstanceWatcher<I>::handle_notify_start_sync(C_SyncRequest *sync_ctx,
+void InstanceWatcher<I>::handle_notify_sync_start(C_SyncRequest *sync_ctx,
                                                   int r) {
   dout(20) << "sync_id=" << sync_ctx->sync_id << ", r=" << r << dendl;
 
@@ -587,12 +587,12 @@ void InstanceWatcher<I>::handle_notify_start_sync(C_SyncRequest *sync_ctx,
   on_start->complete(r == -ECANCELED ? r : 0);
 
   if (r == -ECANCELED) {
-    notify_finish_sync(sync_ctx->sync_id);
+    notify_sync_finish(sync_ctx->sync_id);
   }
 }
 
 template <typename I>
-void InstanceWatcher<I>::handle_notify_complete_sync(C_SyncRequest *sync_ctx,
+void InstanceWatcher<I>::handle_notify_sync_complete(C_SyncRequest *sync_ctx,
                                                      int r) {
   dout(20) << "sync_id=" << sync_ctx->sync_id << ", r=" << r << dendl;
 
@@ -640,8 +640,8 @@ void InstanceWatcher<I>::handle_acquire_leader() {
     dout(20) << "sync_id=" << sync_ctx->sync_id
              << ": canceling request to remote throttler" << dendl;
     if (sync_ctx->req == nullptr) {
-      // It is waiting for notify_finish_sync. Clear instance_id so
-      // when notify_finish_sync is eventually called we will skip
+      // It is waiting for notify_sync_finish. Clear instance_id so
+      // when notify_sync_finish is eventually called we will skip
       // sending notification.
       sync_ctx->instance_id.clear();
       continue;

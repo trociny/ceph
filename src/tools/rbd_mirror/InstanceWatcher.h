@@ -74,10 +74,10 @@ public:
                             const std::string &peer_image_id,
 			    bool schedule_delete, Context *on_notify_ack);
 
-  void notify_start_sync(const std::string &request_id,
+  void notify_sync_start(const std::string &request_id,
                          Context *on_notify_ack);
-  bool notify_cancel_sync(const std::string &request_id);
-  void notify_finish_sync(const std::string &request_id);
+  bool notify_sync_cancel(const std::string &request_id);
+  void notify_sync_finish(const std::string &request_id);
 
   void print_sync_status(Formatter *f, stringstream *ss);
 
@@ -208,8 +208,8 @@ private:
   void break_instance_lock();
   void handle_break_instance_lock(int r);
 
-  void handle_notify_start_sync(C_SyncRequest *sync_ctx, int r);
-  void handle_notify_complete_sync(C_SyncRequest *sync_ctx, int r);
+  void handle_notify_sync_start(C_SyncRequest *sync_ctx, int r);
+  void handle_notify_sync_complete(C_SyncRequest *sync_ctx, int r);
 
   void suspend_notify_request(C_NotifyInstanceRequest *req);
   bool unsuspend_notify_request(C_NotifyInstanceRequest *req);

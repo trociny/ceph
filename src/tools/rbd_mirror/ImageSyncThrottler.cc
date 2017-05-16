@@ -97,14 +97,14 @@ void ImageSyncThrottler<I>::start_sync(I *local_image_ctx, I *remote_image_ctx,
       handle_sync_started(r, sync_holder_ctx);
     });
 
-  m_instance_watcher->notify_start_sync(local_image_ctx->id, on_start);
+  m_instance_watcher->notify_sync_start(local_image_ctx->id, on_start);
 }
 
 template <typename I>
 void ImageSyncThrottler<I>::cancel_sync(const std::string &local_image_id) {
   dout(20) << "local_image_id=" << local_image_id << dendl;
 
-  if (m_instance_watcher->notify_cancel_sync(local_image_id)) {
+  if (m_instance_watcher->notify_sync_cancel(local_image_id)) {
     return;
   }
 
@@ -164,7 +164,7 @@ void ImageSyncThrottler<I>::handle_sync_finished(int r,
            << dendl;
 
   sync_holder->m_on_finish->complete(r);
-  m_instance_watcher->notify_finish_sync(sync_holder->m_local_image_id);
+  m_instance_watcher->notify_sync_finish(sync_holder->m_local_image_id);
   Mutex::Locker locker(m_lock);
   auto resut = m_inflight_syncs.erase(sync_holder->m_local_image_id);
   assert(resut > 0);
