@@ -72,7 +72,6 @@ private:
 
   InstanceWatcher<ImageCtxT> *m_instance_watcher = nullptr;
   Mutex m_lock;
-  std::map<std::string, C_SyncHolder *> m_waiting_syncs;
   std::map<std::string, C_SyncHolder *> m_inflight_syncs;
 };
 

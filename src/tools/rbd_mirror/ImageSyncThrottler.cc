@@ -53,7 +53,6 @@ ImageSyncThrottler<I>::ImageSyncThrottler()
 template <typename I>
 ImageSyncThrottler<I>::~ImageSyncThrottler() {
   Mutex::Locker locker(m_lock);
-  assert(m_waiting_syncs.empty());
   assert(m_inflight_syncs.empty());
 }
 
@@ -88,10 +87,6 @@ void ImageSyncThrottler<I>::start_sync(I *local_image_ctx, I *remote_image_ctx,
                                                  progress_ctx);
   sync_holder_ctx->m_sync->get();
 
-  {
-    Mutex::Locker locker(m_lock);
-    m_waiting_syncs[local_image_ctx->id] = sync_holder_ctx;
-  }
   auto on_start = new FunctionContext(
     [this, sync_holder_ctx] (int r) {
       handle_sync_started(r, sync_holder_ctx);
@@ -136,25 +131,20 @@ void ImageSyncThrottler<I>::handle_sync_started(int r,
   dout(20) << "local_image_id=" << sync_holder->m_local_image_id << ", r=" << r
            << dendl;
 
-  Mutex::Locker locker(m_lock);
-
-  auto it = m_waiting_syncs.find(sync_holder->m_local_image_id);
-  assert(it != m_waiting_syncs.end());
-  auto sync_holder_ctx = it->second;
-  m_waiting_syncs.erase(it);
-
   if (r == -ECANCELED) {
     dout(10) << "canceled waiting image sync for local_image_id "
              << sync_holder->m_local_image_id << dendl;
-    sync_holder_ctx->m_on_finish->complete(r);
+    sync_holder->m_on_finish->complete(r);
     sync_holder->m_sync->put();
-    delete sync_holder_ctx;
+    delete sync_holder;
     return;
   }
 
   assert(r == 0);
-  m_inflight_syncs[sync_holder->m_local_image_id] = sync_holder_ctx;
-  sync_holder_ctx->m_sync->send();
+
+  Mutex::Locker locker(m_lock);
+  m_inflight_syncs[sync_holder->m_local_image_id] = sync_holder;
+  sync_holder->m_sync->send();
 }
 
 template <typename I>
