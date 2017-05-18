@@ -175,7 +175,6 @@ namespace mirror {
 class TestMockImageSyncThrottler : public TestMockFixture {
 public:
   typedef ImageSyncThrottler<librbd::MockTestImageCtx> MockImageSyncThrottler;
-  typedef InstanceSyncThrottler<librbd::MockTestImageCtx> MockInstanceSyncThrottler;
   typedef InstanceWatcher<librbd::MockTestImageCtx> MockInstanceWatcher;
   typedef Threads<librbd::MockTestImageCtx> MockThreads;
 
