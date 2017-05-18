@@ -215,10 +215,10 @@ private:
   bool unsuspend_notify_request(C_NotifyInstanceRequest *req);
   void unsuspend_notify_requests();
 
-  void send_sync_start(const std::string &sync_id, Context *on_start);
-
   Context *prepare_request(const std::string &instance_id, uint64_t request_id,
                            C_NotifyAck *on_notify_ack);
+  void complete_request(const std::string &instance_id, uint64_t request_id,
+                        int r);
 
   void handle_notify(uint64_t notify_id, uint64_t handle,
                      uint64_t notifier_id, bufferlist &bl) override;
