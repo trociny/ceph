@@ -3,7 +3,6 @@
 
 #include "test/rbd_mirror/test_mock_fixture.h"
 #include "test/librbd/mock/MockImageCtx.h"
-#include "tools/rbd_mirror/Threads.h"
 
 namespace librbd {
 
@@ -20,27 +19,27 @@ struct MockTestImageCtx : public librbd::MockImageCtx {
 } // namespace librbd
 
 // template definitions
-#include "tools/rbd_mirror/InstanceSyncThrottler.cc"
+#include "tools/rbd_mirror/Throttler.cc"
 
 namespace rbd {
 namespace mirror {
 
-class TestMockInstanceSyncThrottler : public TestMockFixture {
+class TestMockThrottler : public TestMockFixture {
 public:
-  typedef InstanceSyncThrottler<librbd::MockTestImageCtx> MockInstanceSyncThrottler;
+  typedef Throttler<librbd::MockTestImageCtx> MockThrottler;
 
 };
 
-TEST_F(TestMockInstanceSyncThrottler, Single_Sync) {
-  MockInstanceSyncThrottler throttler;
+TEST_F(TestMockThrottler, Single_Sync) {
+  MockThrottler throttler;
   C_SaferCond on_start;
   throttler.start_op("id", &on_start);
   ASSERT_EQ(0, on_start.wait());
   throttler.finish_op("id");
 }
 
-TEST_F(TestMockInstanceSyncThrottler, Multiple_Syncs) {
-  MockInstanceSyncThrottler throttler;
+TEST_F(TestMockThrottler, Multiple_Syncs) {
+  MockThrottler throttler;
   throttler.set_max_concurrent_syncs(2);
 
   C_SaferCond on_start1;
@@ -62,8 +61,8 @@ TEST_F(TestMockInstanceSyncThrottler, Multiple_Syncs) {
   throttler.finish_op("id4");
 }
 
-TEST_F(TestMockInstanceSyncThrottler, Cancel_Running_Sync) {
-  MockInstanceSyncThrottler throttler;
+TEST_F(TestMockThrottler, Cancel_Running_Sync) {
+  MockThrottler throttler;
   C_SaferCond on_start;
   throttler.start_op("id", &on_start);
   ASSERT_EQ(0, on_start.wait());
@@ -71,8 +70,8 @@ TEST_F(TestMockInstanceSyncThrottler, Cancel_Running_Sync) {
   throttler.finish_op("id");
 }
 
-TEST_F(TestMockInstanceSyncThrottler, Cancel_Waiting_Sync) {
-  MockInstanceSyncThrottler throttler;
+TEST_F(TestMockThrottler, Cancel_Waiting_Sync) {
+  MockThrottler throttler;
   throttler.set_max_concurrent_syncs(1);
 
   C_SaferCond on_start1;
@@ -87,8 +86,8 @@ TEST_F(TestMockInstanceSyncThrottler, Cancel_Waiting_Sync) {
 }
 
 
-TEST_F(TestMockInstanceSyncThrottler, Cancel_Running_Sync_Start_Waiting) {
-  MockInstanceSyncThrottler throttler;
+TEST_F(TestMockThrottler, Cancel_Running_Sync_Start_Waiting) {
+  MockThrottler throttler;
   throttler.set_max_concurrent_syncs(1);
 
   C_SaferCond on_start1;
@@ -103,8 +102,8 @@ TEST_F(TestMockInstanceSyncThrottler, Cancel_Running_Sync_Start_Waiting) {
   throttler.finish_op("id2");
 }
 
-TEST_F(TestMockInstanceSyncThrottler, Increase_Max_Concurrent_Syncs) {
-  MockInstanceSyncThrottler throttler;
+TEST_F(TestMockThrottler, Increase_Max_Concurrent_Syncs) {
+  MockThrottler throttler;
   throttler.set_max_concurrent_syncs(2);
 
   C_SaferCond on_start1;
@@ -135,8 +134,8 @@ TEST_F(TestMockInstanceSyncThrottler, Increase_Max_Concurrent_Syncs) {
   throttler.finish_op("id5");
 }
 
-TEST_F(TestMockInstanceSyncThrottler, Decrease_Max_Concurrent_Syncs) {
-  MockInstanceSyncThrottler throttler;
+TEST_F(TestMockThrottler, Decrease_Max_Concurrent_Syncs) {
+  MockThrottler throttler;
   throttler.set_max_concurrent_syncs(4);
 
   C_SaferCond on_start1;

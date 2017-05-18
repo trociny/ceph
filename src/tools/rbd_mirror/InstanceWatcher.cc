@@ -10,7 +10,7 @@
 #include "librbd/ManagedLock.h"
 #include "librbd/Utils.h"
 #include "InstanceReplayer.h"
-#include "InstanceSyncThrottler.h"
+#include "Throttler.h"
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rbd_mirror
@@ -332,7 +332,7 @@ InstanceWatcher<I>::~InstanceWatcher() {
   assert(m_suspended_ops.empty());
   assert(m_remote_throttler_syncs.empty());
   assert(m_local_throttler_syncs.empty());
-  assert(m_instance_sync_throttler == nullptr);
+  assert(m_throttler == nullptr);
   m_instance_lock->destroy();
 }
 
@@ -592,8 +592,8 @@ void InstanceWatcher<I>::print_sync_status(Formatter *f, stringstream *ss) {
   dout(20) << dendl;
 
   Mutex::Locker locker(m_lock);
-  if (m_instance_sync_throttler != nullptr) {
-    m_instance_sync_throttler->print_status(f, ss);
+  if (m_throttler != nullptr) {
+    m_throttler->print_status(f, ss);
   }
 }
 
@@ -603,8 +603,8 @@ void InstanceWatcher<I>::handle_acquire_leader() {
 
   Mutex::Locker locker(m_lock);
 
-  assert(m_instance_sync_throttler == nullptr);
-  m_instance_sync_throttler = InstanceSyncThrottler<I>::create();
+  assert(m_throttler == nullptr);
+  m_throttler = Throttler<I>::create();
 
   for (auto &it : m_remote_throttler_syncs) {
     auto sync_ctx = it.second;
@@ -626,7 +626,7 @@ void InstanceWatcher<I>::handle_release_leader() {
 
   Mutex::Locker locker(m_lock);
 
-  assert(m_instance_sync_throttler != nullptr);
+  assert(m_throttler != nullptr);
 
   m_leader_instance_id.clear();
 
@@ -637,12 +637,12 @@ void InstanceWatcher<I>::handle_release_leader() {
       m_work_queue->queue(on_start, -ESTALE);
       on_start = nullptr;
     }
-    m_instance_sync_throttler->cancel_op(sync_id);
+    m_throttler->cancel_op(sync_id);
   }
   m_local_throttler_syncs.clear();
 
-  m_instance_sync_throttler->destroy();
-  m_instance_sync_throttler = nullptr;
+  m_throttler->destroy();
+  m_throttler = nullptr;
 }
 
 template <typename I>
@@ -1177,7 +1177,7 @@ void InstanceWatcher<I>::handle_sync_start(const std::string &instance_id,
   dout(20) << "instance_id=" << instance_id << ", sync_id=" << sync_id << dendl;
 
   assert(m_lock.is_locked());
-  assert(m_instance_sync_throttler != nullptr);
+  assert(m_throttler != nullptr);
 
   Id id(instance_id, sync_id);
 
@@ -1208,7 +1208,7 @@ void InstanceWatcher<I>::handle_sync_start(const std::string &instance_id,
         }
         on_finish->complete(r);
       }));
-  m_instance_sync_throttler->start_op(sync_id, on_start);
+  m_throttler->start_op(sync_id, on_start);
 }
 
 template <typename I>
@@ -1217,7 +1217,7 @@ bool InstanceWatcher<I>::handle_sync_cancel(const std::string &instance_id,
   dout(20) << "instance_id=" << instance_id << ", sync_id=" << sync_id << dendl;
 
   assert(m_lock.is_locked());
-  assert(m_instance_sync_throttler != nullptr);
+  assert(m_throttler != nullptr);
 
   auto it = m_local_throttler_syncs.find(Id(instance_id, sync_id));
   if (it == m_local_throttler_syncs.end()) {
@@ -1225,7 +1225,7 @@ bool InstanceWatcher<I>::handle_sync_cancel(const std::string &instance_id,
     return false;
   }
 
-  auto result = m_instance_sync_throttler->cancel_op(sync_id);
+  auto result = m_throttler->cancel_op(sync_id);
   if (result) {
     m_local_throttler_syncs.erase(it);
   }
@@ -1238,7 +1238,7 @@ void InstanceWatcher<I>::handle_sync_finish(const std::string &instance_id,
   dout(20) << "instance_id=" << instance_id << ", sync_id=" << sync_id << dendl;
 
   assert(m_lock.is_locked());
-  assert(m_instance_sync_throttler != nullptr);
+  assert(m_throttler != nullptr);
 
   auto it = m_local_throttler_syncs.find(Id(instance_id, sync_id));
   if (it == m_local_throttler_syncs.end()) {
@@ -1246,7 +1246,7 @@ void InstanceWatcher<I>::handle_sync_finish(const std::string &instance_id,
     return;
   }
 
-  m_instance_sync_throttler->finish_op(sync_id);
+  m_throttler->finish_op(sync_id);
   m_local_throttler_syncs.erase(it);
 }
 
@@ -1296,7 +1296,7 @@ void InstanceWatcher<I>::handle_payload(const std::string &instance_id,
 
   {
     Mutex::Locker locker(m_lock);
-    if (m_instance_sync_throttler != nullptr) {
+    if (m_throttler != nullptr) {
       handle_sync_start(instance_id, payload.sync_id, on_finish);
       return;
     }
@@ -1320,7 +1320,7 @@ void InstanceWatcher<I>::handle_payload(const std::string &instance_id,
 
   {
     Mutex::Locker locker(m_lock);
-    if (m_instance_sync_throttler != nullptr) {
+    if (m_throttler != nullptr) {
       if (!handle_sync_cancel(instance_id, payload.sync_id)) {
         handle_sync_finish(instance_id, payload.sync_id);
       }

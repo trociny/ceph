@@ -26,7 +26,7 @@ namespace rbd {
 namespace mirror {
 
 template <typename> class InstanceReplayer;
-template <typename> class InstanceSyncThrottler;
+template <typename> class Throttler;
 template <typename> struct Threads;
 
 template <typename ImageCtxT = librbd::ImageCtx>
@@ -173,7 +173,7 @@ private:
   std::map<Id, Context *> m_local_throttler_syncs;
   uint64_t m_request_seq = 0;
   std::set<Request> m_requests;
-  InstanceSyncThrottler<ImageCtxT> *m_instance_sync_throttler = nullptr;
+  Throttler<ImageCtxT> *m_throttler = nullptr;
 
   void register_instance();
   void handle_register_instance(int r);

@@ -1,7 +1,7 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
-#include "InstanceSyncThrottler.h"
+#include "Throttler.h"
 #include "common/Formatter.h"
 #include "common/debug.h"
 #include "common/errno.h"
@@ -10,15 +10,15 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rbd_mirror
 #undef dout_prefix
-#define dout_prefix *_dout << "rbd::mirror::InstanceSyncThrottler:: " << this \
+#define dout_prefix *_dout << "rbd::mirror::Throttler:: " << this \
                            << " " << __func__ << ": "
 
 namespace rbd {
 namespace mirror {
 
 template <typename I>
-InstanceSyncThrottler<I>::InstanceSyncThrottler()
-  : m_lock(librbd::util::unique_lock_name("rbd::mirror::InstanceSyncThrottler",
+Throttler<I>::Throttler()
+  : m_lock(librbd::util::unique_lock_name("rbd::mirror::Throttler",
                                           this)),
     m_max_concurrent_syncs(
       g_ceph_context->_conf->rbd_mirror_concurrent_image_syncs) {
@@ -27,7 +27,7 @@ InstanceSyncThrottler<I>::InstanceSyncThrottler()
 }
 
 template <typename I>
-InstanceSyncThrottler<I>::~InstanceSyncThrottler() {
+Throttler<I>::~Throttler() {
   g_ceph_context->_conf->remove_observer(this);
 
   Mutex::Locker locker(m_lock);
@@ -36,8 +36,7 @@ InstanceSyncThrottler<I>::~InstanceSyncThrottler() {
 }
 
 template <typename I>
-void InstanceSyncThrottler<I>::start_op(const std::string &id,
-                                        Context *on_start) {
+void Throttler<I>::start_op(const std::string &id, Context *on_start) {
   dout(20) << "id=" << id << dendl;
 
   {
@@ -64,7 +63,7 @@ void InstanceSyncThrottler<I>::start_op(const std::string &id,
 }
 
 template <typename I>
-bool InstanceSyncThrottler<I>::cancel_op(const std::string &id) {
+bool Throttler<I>::cancel_op(const std::string &id) {
   dout(20) << "id=" << id << dendl;
 
   Context *on_start = nullptr;
@@ -89,7 +88,7 @@ bool InstanceSyncThrottler<I>::cancel_op(const std::string &id) {
 }
 
 template <typename I>
-void InstanceSyncThrottler<I>::finish_op(const std::string &id) {
+void Throttler<I>::finish_op(const std::string &id) {
   dout(20) << "id=" << id << dendl;
 
   Context *on_start = nullptr;
@@ -116,7 +115,7 @@ void InstanceSyncThrottler<I>::finish_op(const std::string &id) {
 }
 
 template <typename I>
-void InstanceSyncThrottler<I>::set_max_concurrent_syncs(uint32_t max) {
+void Throttler<I>::set_max_concurrent_syncs(uint32_t max) {
   dout(20) << "max=" << max << dendl;
 
   std::list<Context *> ops;
@@ -144,8 +143,7 @@ void InstanceSyncThrottler<I>::set_max_concurrent_syncs(uint32_t max) {
 }
 
 template <typename I>
-void InstanceSyncThrottler<I>::print_status(Formatter *f,
-                                            std::stringstream *ss) {
+void Throttler<I>::print_status(Formatter *f, std::stringstream *ss) {
   dout(20) << dendl;
 
   Mutex::Locker locker(m_lock);
@@ -164,7 +162,7 @@ void InstanceSyncThrottler<I>::print_status(Formatter *f,
 }
 
 template <typename I>
-const char** InstanceSyncThrottler<I>::get_tracked_conf_keys() const {
+const char** Throttler<I>::get_tracked_conf_keys() const {
   static const char* KEYS[] = {
     "rbd_mirror_concurrent_image_syncs",
     NULL
@@ -173,7 +171,7 @@ const char** InstanceSyncThrottler<I>::get_tracked_conf_keys() const {
 }
 
 template <typename I>
-void InstanceSyncThrottler<I>::handle_conf_change(const struct md_config_t *conf,
+void Throttler<I>::handle_conf_change(const struct md_config_t *conf,
                                       const set<string> &changed) {
   if (changed.count("rbd_mirror_concurrent_image_syncs")) {
     set_max_concurrent_syncs(conf->rbd_mirror_concurrent_image_syncs);
@@ -183,4 +181,4 @@ void InstanceSyncThrottler<I>::handle_conf_change(const struct md_config_t *conf
 } // namespace mirror
 } // namespace rbd
 
-template class rbd::mirror::InstanceSyncThrottler<librbd::ImageCtx>;
+template class rbd::mirror::Throttler<librbd::ImageCtx>;

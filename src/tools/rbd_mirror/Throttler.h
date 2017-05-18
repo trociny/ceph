@@ -1,8 +1,8 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
-#ifndef RBD_MIRROR_INSTANCE_SYNC_THROTTLER_H
-#define RBD_MIRROR_INSTANCE_SYNC_THROTTLER_H
+#ifndef RBD_MIRROR_THROTTLER_H
+#define RBD_MIRROR_THROTTLER_H
 
 #include <list>
 #include <set>
@@ -22,17 +22,17 @@ namespace rbd {
 namespace mirror {
 
 template <typename ImageCtxT = librbd::ImageCtx>
-class InstanceSyncThrottler : public md_config_obs_t {
+class Throttler : public md_config_obs_t {
 public:
-  static InstanceSyncThrottler *create() {
-    return new InstanceSyncThrottler();
+  static Throttler *create() {
+    return new Throttler();
   }
   void destroy() {
     delete this;
   }
 
-  InstanceSyncThrottler();
-  ~InstanceSyncThrottler() override;
+  Throttler();
+  ~Throttler() override;
 
   void set_max_concurrent_syncs(uint32_t max);
   void start_op(const std::string &id, Context *on_start);
@@ -55,6 +55,6 @@ private:
 } // namespace mirror
 } // namespace rbd
 
-extern template class rbd::mirror::InstanceSyncThrottler<librbd::ImageCtx>;
+extern template class rbd::mirror::Throttler<librbd::ImageCtx>;
 
-#endif // RBD_MIRROR_INSTANCE_SYNC_THROTTLER_H
+#endif // RBD_MIRROR_THROTTLER_H
