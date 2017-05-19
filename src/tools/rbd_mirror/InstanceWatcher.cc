@@ -98,6 +98,10 @@ struct InstanceWatcher<I>::C_NotifyInstanceRequest : public Context {
     : instance_watcher(instance_watcher), instance_id(instance_id),
       request_id(request_id), bl(bl), on_finish(on_finish),
       send_to_leader(instance_id.empty()) {
+    dout(20) << "C_NotifyInstanceRequest: " << this << " " << __func__
+             << ": instance_watcher=" << instance_watcher << ", instance_id="
+             << instance_id << ", request_id=" << request_id << dendl;
+
     assert(instance_watcher->m_lock.is_locked());
 
     if (!send_to_leader) {
@@ -256,7 +260,8 @@ struct InstanceWatcher<I>::C_SyncRequest : public Context {
                 const std::string &sync_id, Context *on_start)
     : instance_watcher(instance_watcher), sync_id(sync_id),
       on_start(on_start) {
-    dout(20) << "C_SyncRequest: " << this << " " << __func__ << dendl;
+    dout(20) << "C_SyncRequest: " << this << " " << __func__ << ": sync_id="
+             << sync_id << dendl;
   }
 
   void finish(int r) override {
