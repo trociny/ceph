@@ -38,6 +38,7 @@ public:
   void start_op(const std::string &id, Context *on_start);
   bool cancel_op(const std::string &id);
   void finish_op(const std::string &id);
+  void drain(int r);
 
   void print_status(Formatter *f, std::stringstream *ss);
 

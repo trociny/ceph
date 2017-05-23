@@ -77,29 +77,27 @@ void ImageSyncThrottler<I>::start_sync(I *local_image_ctx, I *remote_image_ctx,
                                        ProgressContext *progress_ctx) {
   dout(20) << "local_image_id=" << local_image_ctx->id << dendl;
 
-  C_SyncHolder *sync_holder_ctx = new C_SyncHolder(this, local_image_ctx->id,
-                                                   on_finish);
-  sync_holder_ctx->m_sync = ImageSync<I>::create(local_image_ctx,
-                                                 remote_image_ctx, timer,
-                                                 timer_lock, mirror_uuid,
-                                                 journaler, client_meta,
-                                                 work_queue, sync_holder_ctx,
-                                                 progress_ctx);
-  sync_holder_ctx->m_sync->get();
+  C_SyncHolder *sync_holder = new C_SyncHolder(this, local_image_ctx->id,
+                                               on_finish);
+  sync_holder->m_sync = ImageSync<I>::create(local_image_ctx, remote_image_ctx,
+                                             timer, timer_lock, mirror_uuid,
+                                             journaler, client_meta, work_queue,
+                                             sync_holder, progress_ctx);
+  sync_holder->m_sync->get();
 
   auto on_start = new FunctionContext(
-    [this, sync_holder_ctx] (int r) {
-      handle_sync_started(r, sync_holder_ctx);
+    [this, sync_holder] (int r) {
+      handle_sync_started(r, sync_holder);
     });
 
-  m_instance_watcher->notify_sync_start(local_image_ctx->id, on_start);
+  m_instance_watcher->notify_sync_request(local_image_ctx->id, on_start);
 }
 
 template <typename I>
 void ImageSyncThrottler<I>::cancel_sync(const std::string &local_image_id) {
   dout(20) << "local_image_id=" << local_image_id << dendl;
 
-  if (m_instance_watcher->notify_sync_cancel(local_image_id)) {
+  if (m_instance_watcher->cancel_notify_sync_request(local_image_id)) {
     return;
   }
 
@@ -154,7 +152,7 @@ void ImageSyncThrottler<I>::handle_sync_finished(int r,
            << dendl;
 
   sync_holder->m_on_finish->complete(r);
-  m_instance_watcher->notify_sync_finish(sync_holder->m_local_image_id);
+  m_instance_watcher->notify_sync_complete(sync_holder->m_local_image_id);
   Mutex::Locker locker(m_lock);
   auto resut = m_inflight_syncs.erase(sync_holder->m_local_image_id);
   assert(resut > 0);

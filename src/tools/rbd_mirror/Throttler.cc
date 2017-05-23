@@ -42,10 +42,11 @@ void Throttler<I>::start_op(const std::string &id, Context *on_start) {
   {
     Mutex::Locker locker(m_lock);
 
-    if (m_max_concurrent_syncs == 0 ||
-        m_inflight_ops.size() < m_max_concurrent_syncs) {
+    if (m_inflight_ops.count(id) > 0) {
+      dout(20) << "duplicate for already started op " << id << dendl;
+    } else if (m_max_concurrent_syncs == 0 ||
+               m_inflight_ops.size() < m_max_concurrent_syncs) {
       assert(m_queue.empty());
-      assert(m_inflight_ops.count(id) == 0);
       m_inflight_ops.insert(id);
       dout(20) << "ready to start sync for " << id << " ["
                << m_inflight_ops.size() << "/" << m_max_concurrent_syncs << "]"
@@ -91,12 +92,15 @@ template <typename I>
 void Throttler<I>::finish_op(const std::string &id) {
   dout(20) << "id=" << id << dendl;
 
+  if (cancel_op(id)) {
+    return;
+  }
+
   Context *on_start = nullptr;
   {
     Mutex::Locker locker(m_lock);
 
-    auto result = m_inflight_ops.erase(id);
-    assert(result > 0);
+    m_inflight_ops.erase(id);
 
     if (m_inflight_ops.size() < m_max_concurrent_syncs && !m_queue.empty()) {
       auto pair = m_queue.front();
@@ -111,6 +115,22 @@ void Throttler<I>::finish_op(const std::string &id) {
 
   if (on_start != nullptr) {
     on_start->complete(0);
+  }
+}
+
+template <typename I>
+void Throttler<I>::drain(int r) {
+  dout(20) << dendl;
+
+  std::list<std::pair<std::string, Context *>> queue;
+  {
+    Mutex::Locker locker(m_lock);
+    std::swap(m_queue, queue);
+    m_inflight_ops.clear();
+  }
+
+  for (auto &pair : queue) {
+    pair.second->complete(r);
   }
 }
 

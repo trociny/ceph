@@ -72,12 +72,12 @@ struct InstanceWatcher<librbd::MockTestImageCtx> {
     EXPECT_TRUE(sync_queue.empty());
   }
 
-  void notify_sync_start(const std::string &sync_id, Context *on_start) {
+  void notify_sync_request(const std::string &sync_id, Context *on_start) {
     sync_queue.push_back(std::make_pair(sync_id, on_start));
     start_syncs();
   }
 
-  bool notify_sync_cancel(const std::string &sync_id) {
+  bool cancel_notify_sync_request(const std::string &sync_id) {
     for (auto it = sync_queue.begin(); it != sync_queue.end(); it++) {
       if (it->first == sync_id) {
         it->second->complete(-ECANCELED);
@@ -90,7 +90,7 @@ struct InstanceWatcher<librbd::MockTestImageCtx> {
     return false;
   }
 
-  void notify_sync_finish(const std::string &sync_id) {
+  void notify_sync_complete(const std::string &sync_id) {
     EXPECT_TRUE(syncs.erase(sync_id) > 0);
     start_syncs();
   }

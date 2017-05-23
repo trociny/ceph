@@ -269,7 +269,7 @@ struct InstanceWatcher<I>::C_SyncRequest : public Context {
              << r << dendl;
 
     if (on_start != nullptr) {
-      instance_watcher->handle_notify_sync_start(this, r);
+      instance_watcher->handle_notify_sync_request(this, r);
     } else {
       instance_watcher->handle_notify_sync_complete(this, r);
       delete this;
@@ -335,8 +335,7 @@ InstanceWatcher<I>::~InstanceWatcher() {
   assert(m_notify_ops.empty());
   assert(m_notify_op_tracker.empty());
   assert(m_suspended_ops.empty());
-  assert(m_remote_throttler_syncs.empty());
-  assert(m_local_throttler_syncs.empty());
+  assert(m_inflight_sync_reqs.empty());
   assert(m_throttler == nullptr);
   m_instance_lock->destroy();
 }
@@ -450,60 +449,40 @@ void InstanceWatcher<I>::notify_image_release(
 }
 
 template <typename I>
-void InstanceWatcher<I>::notify_sync_start(const std::string &sync_id,
-                                           Context *on_notify_ack) {
+void InstanceWatcher<I>::notify_sync_request(const std::string &sync_id,
+                                             Context *on_sync_start) {
   dout(20) << "sync_id=" << sync_id << dendl;
 
   Mutex::Locker locker(m_lock);
 
-  if (m_remote_throttler_syncs.count(sync_id) != 0) {
-    // This should only be possible when notify_sync_finish for the
-    // same sync_id has been called and returned but the leader
-    // notification is still in progress. Wait for it to complete
-    // before proceed with this request.
-    auto sync_ctx = m_remote_throttler_syncs[sync_id];
-    assert(sync_ctx->on_start == nullptr);
-    assert(sync_ctx->on_complete == nullptr);
-    sync_ctx->on_complete = new FunctionContext(
-      [this, sync_id, on_notify_ack] (int r) {
-        if (r == -ECANCELED) {
-          on_notify_ack->complete(-ECANCELED);
-          return;
-        }
-        notify_sync_start(sync_id, on_notify_ack);
-      });
-    dout(20) << "sync_id=" << sync_id
-             << ": delaying until previous sync notification complete" << dendl;
-    return;
-  }
+  assert(m_inflight_sync_reqs.count(sync_id) == 0);
 
   uint64_t request_id = ++m_request_seq;
 
   bufferlist bl;
-  ::encode(NotifyMessage{SyncStartPayload{request_id, sync_id}}, bl);
+  ::encode(NotifyMessage{SyncRequestPayload{request_id, sync_id}}, bl);
 
-  auto sync_ctx = new C_SyncRequest(this, sync_id, on_notify_ack);
+  auto sync_ctx = new C_SyncRequest(this, sync_id, on_sync_start);
   sync_ctx->req = new C_NotifyInstanceRequest(this, "", request_id,
                                               std::move(bl), sync_ctx);
 
-  m_remote_throttler_syncs[sync_id] = sync_ctx;
+  m_inflight_sync_reqs[sync_id] = sync_ctx;
   sync_ctx->req->send();
 }
 
 template <typename I>
-bool InstanceWatcher<I>::notify_sync_cancel(const std::string &sync_id) {
+bool InstanceWatcher<I>::cancel_notify_sync_request(
+    const std::string &sync_id) {
   dout(20) << "sync_id=" << sync_id << dendl;
 
   Mutex::Locker locker(m_lock);
 
-  assert(m_remote_throttler_syncs.count(sync_id) > 0);
-  auto sync_ctx = m_remote_throttler_syncs[sync_id];
-
-  if (sync_ctx->on_complete != nullptr) {
-    m_work_queue->queue(sync_ctx->on_complete, -ECANCELED);
-    sync_ctx->on_complete = nullptr;
-    return true;
+  auto it = m_inflight_sync_reqs.find(sync_id);
+  if (it == m_inflight_sync_reqs.end()) {
+    return false;
   }
+
+  auto sync_ctx = it->second;
 
   if (sync_ctx->on_start == nullptr) {
     return false;
@@ -515,18 +494,45 @@ bool InstanceWatcher<I>::notify_sync_cancel(const std::string &sync_id) {
 }
 
 template <typename I>
-void InstanceWatcher<I>::notify_sync_finish(const std::string &sync_id) {
+void InstanceWatcher<I>::notify_sync_start(const std::string &instance_id,
+                                           const std::string &sync_id) {
   dout(20) << "sync_id=" << sync_id << dendl;
 
   Mutex::Locker locker(m_lock);
 
-  assert(m_remote_throttler_syncs.count(sync_id) > 0);
-  auto sync_ctx = m_remote_throttler_syncs[sync_id];
+  uint64_t request_id = ++m_request_seq;
 
+  bufferlist bl;
+  ::encode(NotifyMessage{SyncStartPayload{request_id, sync_id}}, bl);
+
+  auto ctx = new FunctionContext(
+    [this, sync_id] (int r) {
+      Mutex::Locker locker(m_lock);
+      if (r != -ESTALE && m_throttler != nullptr) {
+        m_throttler->finish_op(sync_id);
+      }
+    });
+  auto req = new C_NotifyInstanceRequest(this, instance_id, request_id,
+                                         std::move(bl), ctx);
+  req->send();
+}
+
+template <typename I>
+void InstanceWatcher<I>::notify_sync_complete(const std::string &sync_id) {
+  dout(20) << "sync_id=" << sync_id << dendl;
+
+  Mutex::Locker locker(m_lock);
+
+  auto it = m_inflight_sync_reqs.find(sync_id);
+  assert(it != m_inflight_sync_reqs.end());
+
+  auto sync_ctx = it->second;
   assert(sync_ctx->req == nullptr);
 
+  m_inflight_sync_reqs.erase(it);
+
   if (sync_ctx->instance_id.empty()) {
-    m_work_queue->queue(sync_ctx, -ESTALE);
+    m_work_queue->queue(sync_ctx, 0);
     return;
   }
 
@@ -540,8 +546,8 @@ void InstanceWatcher<I>::notify_sync_finish(const std::string &sync_id) {
 }
 
 template <typename I>
-void InstanceWatcher<I>::handle_notify_sync_start(C_SyncRequest *sync_ctx,
-                                                  int r) {
+void InstanceWatcher<I>::handle_notify_sync_request(C_SyncRequest *sync_ctx,
+                                                    int r) {
   dout(20) << "sync_id=" << sync_ctx->sync_id << ", r=" << r << dendl;
 
   Context *on_start = nullptr;
@@ -563,7 +569,7 @@ void InstanceWatcher<I>::handle_notify_sync_start(C_SyncRequest *sync_ctx,
   on_start->complete(r == -ECANCELED ? r : 0);
 
   if (r == -ECANCELED) {
-    notify_sync_finish(sync_ctx->sync_id);
+    notify_sync_complete(sync_ctx->sync_id);
   }
 }
 
@@ -572,23 +578,8 @@ void InstanceWatcher<I>::handle_notify_sync_complete(C_SyncRequest *sync_ctx,
                                                      int r) {
   dout(20) << "sync_id=" << sync_ctx->sync_id << ", r=" << r << dendl;
 
-  Context *on_complete = nullptr;
-  {
-    Mutex::Locker locker(m_lock);
-
-    auto it = m_remote_throttler_syncs.find(sync_ctx->sync_id);
-    if (it == m_remote_throttler_syncs.end()) {
-      dout(20) << "sync_id=" << sync_ctx->sync_id
-               << ": canceled on leader acquire" << dendl;
-    } else {
-      assert(it->second == sync_ctx);
-      m_remote_throttler_syncs.erase(it);
-    }
-    std::swap(sync_ctx->on_complete, on_complete);
-  }
-
-  if (on_complete != nullptr) {
-    on_complete->complete(0);
+  if (sync_ctx->on_complete != nullptr) {
+    sync_ctx->on_complete->complete(r);
   }
 }
 
@@ -611,7 +602,7 @@ void InstanceWatcher<I>::handle_acquire_leader() {
   assert(m_throttler == nullptr);
   m_throttler = Throttler<I>::create();
 
-  for (auto &it : m_remote_throttler_syncs) {
+  for (auto &it : m_inflight_sync_reqs) {
     auto sync_ctx = it.second;
     if (sync_ctx->req == nullptr) {
       // It is waiting for notify_sync_finish. Clear instance_id so
@@ -635,19 +626,19 @@ void InstanceWatcher<I>::handle_release_leader() {
 
   m_leader_instance_id.clear();
 
-  for (auto &it : m_local_throttler_syncs) {
-    auto &sync_id = it.first.second;
-    auto &on_start = it.second;
-    if (on_start != nullptr) {
-      m_work_queue->queue(on_start, -ESTALE);
-      on_start = nullptr;
-    }
-    m_throttler->cancel_op(sync_id);
-  }
-  m_local_throttler_syncs.clear();
-
+  m_throttler->drain(-ESTALE);
   m_throttler->destroy();
   m_throttler = nullptr;
+
+  for (auto &it : m_inflight_sync_reqs) {
+    auto sync_ctx = it.second;
+    if (sync_ctx->req == nullptr) {
+      // It is waiting for notify_sync_finish. Clear instance_id so
+      // when notify_sync_finish is eventually called we will skip
+      // sending notification.
+      sync_ctx->instance_id.clear();
+    }
+  }
 }
 
 template <typename I>
@@ -1176,40 +1167,26 @@ void InstanceWatcher<I>::handle_image_release(
 }
 
 template <typename I>
-void InstanceWatcher<I>::handle_sync_start(const std::string &instance_id,
-                                           const std::string &sync_id,
-                                           Context *on_finish) {
+void InstanceWatcher<I>::handle_sync_request(const std::string &instance_id,
+                                             const std::string &sync_id,
+                                             Context *on_finish) {
   dout(20) << "instance_id=" << instance_id << ", sync_id=" << sync_id << dendl;
 
-  assert(m_lock.is_locked());
-  assert(m_throttler != nullptr);
+  Mutex::Locker locker(m_lock);
 
-  Id id(instance_id, sync_id);
-
-  auto it = m_local_throttler_syncs.find(Id(instance_id, sync_id));
-  if (it != m_local_throttler_syncs.end()) {
-    assert(it->second == nullptr);
-    dout(20) << "duplicate for already started request" << dendl;
-    m_work_queue->queue(on_finish, 0);
+  if (m_throttler == nullptr) {
+    dout(20) << "sync request for non-leader" << dendl;
+    m_work_queue->queue(on_finish, -ESTALE);
     return;
   }
 
-  m_local_throttler_syncs[id] = on_finish;
   Context *on_start = create_async_context_callback(
     m_work_queue, new FunctionContext(
-      [this, id] (int r) {
-        dout(20) << "finish: instance_id=" << id.first << ", sync_id="
-                 << id.second << dendl;
-        Context *on_finish = nullptr;
-        {
-          Mutex::Locker locker(m_lock);
-          auto it = m_local_throttler_syncs.find(id);
-          if (it == m_local_throttler_syncs.end()) {
-            assert(r == -ECANCELED);
-            dout(20) << "finish: canceled on leader release" << dendl;
-            return;
-          }
-          std::swap(it->second, on_finish);
+      [this, instance_id, sync_id, on_finish] (int r) {
+        dout(20) << "handle_sync_request: finish: instance_id=" << instance_id
+                 << ", sync_id=" << sync_id << ", r=" << r << dendl;
+        if (r == 0) {
+          notify_sync_start(instance_id, sync_id);
         }
         on_finish->complete(r);
       }));
@@ -1217,42 +1194,45 @@ void InstanceWatcher<I>::handle_sync_start(const std::string &instance_id,
 }
 
 template <typename I>
-bool InstanceWatcher<I>::handle_sync_cancel(const std::string &instance_id,
-                                            const std::string &sync_id) {
+void InstanceWatcher<I>::handle_sync_start(const std::string &instance_id,
+                                           const std::string &sync_id,
+                                           Context *on_finish) {
   dout(20) << "instance_id=" << instance_id << ", sync_id=" << sync_id << dendl;
 
-  assert(m_lock.is_locked());
-  assert(m_throttler != nullptr);
+  Mutex::Locker locker(m_lock);
 
-  auto it = m_local_throttler_syncs.find(Id(instance_id, sync_id));
-  if (it == m_local_throttler_syncs.end()) {
+  auto it = m_inflight_sync_reqs.find(sync_id);
+  if (it == m_inflight_sync_reqs.end()) {
     dout(20) << "not found" << dendl;
-    return false;
-  }
-
-  auto result = m_throttler->cancel_op(sync_id);
-  if (result) {
-    m_local_throttler_syncs.erase(it);
-  }
-  return result;
-}
-
-template <typename I>
-void InstanceWatcher<I>::handle_sync_finish(const std::string &instance_id,
-                                            const std::string &sync_id) {
-  dout(20) << "instance_id=" << instance_id << ", sync_id=" << sync_id << dendl;
-
-  assert(m_lock.is_locked());
-  assert(m_throttler != nullptr);
-
-  auto it = m_local_throttler_syncs.find(Id(instance_id, sync_id));
-  if (it == m_local_throttler_syncs.end()) {
-    dout(20) << "not found" << dendl;
+    m_work_queue->queue(on_finish, 0);
     return;
   }
 
-  m_throttler->finish_op(sync_id);
-  m_local_throttler_syncs.erase(it);
+  auto sync_ctx = it->second;
+
+  if (sync_ctx->on_complete != nullptr) {
+    dout(20) << "duplicate request" << dendl;
+    m_work_queue->queue(sync_ctx->on_complete, -ESTALE);
+  }
+
+  sync_ctx->on_complete = on_finish;
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_sync_complete(const std::string &instance_id,
+                                              const std::string &sync_id,
+                                              Context *on_finish) {
+  dout(20) << "instance_id=" << instance_id << ", sync_id=" << sync_id << dendl;
+
+  Mutex::Locker locker(m_lock);
+
+  if (m_throttler == nullptr) {
+    dout(20) << "sync complete for non-leader" << dendl;
+  } else {
+    m_throttler->finish_op(sync_id);
+  }
+
+  m_work_queue->queue(on_finish, 0);
 }
 
 template <typename I>
@@ -1288,6 +1268,22 @@ void InstanceWatcher<I>::handle_payload(const std::string &instance_id,
 
 template <typename I>
 void InstanceWatcher<I>::handle_payload(const std::string &instance_id,
+                                        const SyncRequestPayload &payload,
+                                        C_NotifyAck *on_notify_ack) {
+  dout(20) << "sync_request: instance_id=" << instance_id << ", "
+           << "request_id=" << payload.request_id << dendl;
+
+  auto on_finish = prepare_request(instance_id, payload.request_id,
+                                   on_notify_ack);
+  if (on_finish == nullptr) {
+    return;
+  }
+
+  handle_sync_request(instance_id, payload.sync_id, on_finish);
+}
+
+template <typename I>
+void InstanceWatcher<I>::handle_payload(const std::string &instance_id,
                                         const SyncStartPayload &payload,
                                         C_NotifyAck *on_notify_ack) {
   dout(20) << "sync_start: instance_id=" << instance_id << ", "
@@ -1299,15 +1295,7 @@ void InstanceWatcher<I>::handle_payload(const std::string &instance_id,
     return;
   }
 
-  {
-    Mutex::Locker locker(m_lock);
-    if (m_throttler != nullptr) {
-      handle_sync_start(instance_id, payload.sync_id, on_finish);
-      return;
-    }
-  }
-
-  on_finish->complete(-ESTALE);
+  handle_sync_start(instance_id, payload.sync_id, on_finish);
 }
 
 template <typename I>
@@ -1323,16 +1311,7 @@ void InstanceWatcher<I>::handle_payload(const std::string &instance_id,
     return;
   }
 
-  {
-    Mutex::Locker locker(m_lock);
-    if (m_throttler != nullptr) {
-      if (!handle_sync_cancel(instance_id, payload.sync_id)) {
-        handle_sync_finish(instance_id, payload.sync_id);
-      }
-    }
-  }
-
-  on_finish->complete(0);
+  handle_sync_complete(instance_id, payload.sync_id, on_finish);
 }
 
 template <typename I>

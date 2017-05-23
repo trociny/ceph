@@ -21,8 +21,9 @@ namespace instance_watcher {
 enum NotifyOp {
   NOTIFY_OP_IMAGE_ACQUIRE  = 0,
   NOTIFY_OP_IMAGE_RELEASE  = 1,
-  NOTIFY_OP_SYNC_START     = 2,
-  NOTIFY_OP_SYNC_COMPLETE  = 3,
+  NOTIFY_OP_SYNC_REQUEST   = 2,
+  NOTIFY_OP_SYNC_START     = 3,
+  NOTIFY_OP_SYNC_COMPLETE  = 4,
 };
 
 struct PayloadBase {
@@ -109,6 +110,17 @@ struct SyncPayloadBase : public PayloadBase {
   void dump(Formatter *f) const;
 };
 
+struct SyncRequestPayload : public SyncPayloadBase {
+  static const NotifyOp NOTIFY_OP = NOTIFY_OP_SYNC_REQUEST;
+
+  SyncRequestPayload() : SyncPayloadBase() {
+  }
+
+  SyncRequestPayload(uint64_t request_id, const std::string &sync_id)
+    : SyncPayloadBase(request_id, sync_id) {
+  }
+};
+
 struct SyncStartPayload : public SyncPayloadBase {
   static const NotifyOp NOTIFY_OP = NOTIFY_OP_SYNC_START;
 
@@ -144,6 +156,7 @@ struct UnknownPayload {
 
 typedef boost::variant<ImageAcquirePayload,
                        ImageReleasePayload,
+                       SyncRequestPayload,
                        SyncStartPayload,
                        SyncCompletePayload,
                        UnknownPayload> Payload;

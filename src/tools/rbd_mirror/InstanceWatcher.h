@@ -74,10 +74,9 @@ public:
                             const std::string &peer_image_id,
 			    bool schedule_delete, Context *on_notify_ack);
 
-  void notify_sync_start(const std::string &request_id,
-                         Context *on_notify_ack);
-  bool notify_sync_cancel(const std::string &request_id);
-  void notify_sync_finish(const std::string &request_id);
+  void notify_sync_request(const std::string &sync_id, Context *on_sync_start);
+  bool cancel_notify_sync_request(const std::string &sync_id);
+  void notify_sync_complete(const std::string &sync_id);
 
   void print_sync_status(Formatter *f, stringstream *ss);
 
@@ -168,11 +167,10 @@ private:
   librbd::managed_lock::Locker m_instance_locker;
   std::set<std::pair<std::string, C_NotifyInstanceRequest *>> m_notify_ops;
   AsyncOpTracker m_notify_op_tracker;
-  std::set<C_NotifyInstanceRequest *> m_suspended_ops;
-  std::map<std::string, C_SyncRequest *> m_remote_throttler_syncs;
-  std::map<Id, Context *> m_local_throttler_syncs;
   uint64_t m_request_seq = 0;
   std::set<Request> m_requests;
+  std::set<C_NotifyInstanceRequest *> m_suspended_ops;
+  std::map<std::string, C_SyncRequest *> m_inflight_sync_reqs;
   Throttler<ImageCtxT> *m_throttler = nullptr;
 
   void register_instance();
@@ -208,12 +206,15 @@ private:
   void break_instance_lock();
   void handle_break_instance_lock(int r);
 
-  void handle_notify_sync_start(C_SyncRequest *sync_ctx, int r);
-  void handle_notify_sync_complete(C_SyncRequest *sync_ctx, int r);
-
   void suspend_notify_request(C_NotifyInstanceRequest *req);
   bool unsuspend_notify_request(C_NotifyInstanceRequest *req);
   void unsuspend_notify_requests();
+
+  void handle_notify_sync_request(C_SyncRequest *sync_ctx, int r);
+  void handle_notify_sync_complete(C_SyncRequest *sync_ctx, int r);
+
+  void notify_sync_start(const std::string &instance_id,
+                         const std::string &sync_id);
 
   Context *prepare_request(const std::string &instance_id, uint64_t request_id,
                            C_NotifyAck *on_notify_ack);
@@ -232,18 +233,21 @@ private:
                             const std::string &peer_image_id,
                             bool schedule_delete, Context *on_finish);
 
+  void handle_sync_request(const std::string &instance_id,
+                           const std::string &sync_id, Context *on_finish);
   void handle_sync_start(const std::string &instance_id,
                          const std::string &sync_id, Context *on_finish);
-  bool handle_sync_cancel(const std::string &instance_id,
-                          const std::string &sync_id);
-  void handle_sync_finish(const std::string &instance_id,
-                          const std::string &sync_id);
+  void handle_sync_complete(const std::string &instance_id,
+                            const std::string &sync_id, Context *on_finish);
 
   void handle_payload(const std::string &instance_id,
                       const instance_watcher::ImageAcquirePayload &payload,
                       C_NotifyAck *on_notify_ack);
   void handle_payload(const std::string &instance_id,
                       const instance_watcher::ImageReleasePayload &payload,
+                      C_NotifyAck *on_notify_ack);
+  void handle_payload(const std::string &instance_id,
+                      const instance_watcher::SyncRequestPayload &payload,
                       C_NotifyAck *on_notify_ack);
   void handle_payload(const std::string &instance_id,
                       const instance_watcher::SyncStartPayload &payload,

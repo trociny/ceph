@@ -151,6 +151,9 @@ void NotifyMessage::decode(bufferlist::iterator& iter) {
   case NOTIFY_OP_IMAGE_RELEASE:
     payload = ImageReleasePayload();
     break;
+  case NOTIFY_OP_SYNC_REQUEST:
+    payload = SyncRequestPayload();
+    break;
   case NOTIFY_OP_SYNC_START:
     payload = SyncStartPayload();
     break;
@@ -177,6 +180,9 @@ void NotifyMessage::generate_test_instances(std::list<NotifyMessage *> &o) {
   o.push_back(new NotifyMessage(ImageReleasePayload()));
   o.push_back(new NotifyMessage(ImageReleasePayload(1, "gid", "uuid", "id",
                                                     true)));
+
+  o.push_back(new NotifyMessage(SyncRequestPayload()));
+  o.push_back(new NotifyMessage(SyncRequestPayload(1, "sync_id")));
 
   o.push_back(new NotifyMessage(SyncStartPayload()));
   o.push_back(new NotifyMessage(SyncStartPayload(1, "sync_id")));
