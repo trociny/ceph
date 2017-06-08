@@ -1495,7 +1495,7 @@ public:
     ThreadPool::TPHandle &handle);
   void do_backfill(OpRequestRef op);
 
-  OpContextUPtr trim_object(const hobject_t &coid);
+  int trim_object(const hobject_t &coid, OpContextUPtr *ctxp);
   void snap_trimmer(epoch_t e);
   int do_osd_ops(OpContext *ctx, vector<OSDOp>& ops);
 
@@ -1649,6 +1649,7 @@ private:
       pending = nullptr;
       auto *pg = context< SnapTrimmer >().pg;
       pg->state_clear(PG_STATE_SNAPTRIM_WAIT);
+      pg->state_clear(PG_STATE_SNAPTRIM_ERROR);
       pg->publish_stats_to_osd();
     }
     boost::statechart::result react(const SnapTrim&) {

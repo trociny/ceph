@@ -3383,28 +3383,35 @@ void ReplicatedPG::do_backfill(OpRequestRef op)
   }
 }
 
-ReplicatedPG::OpContextUPtr ReplicatedPG::trim_object(const hobject_t &coid)
+int ReplicatedPG::trim_object(
+  const hobject_t &coid, ReplicatedPG::OpContextUPtr *ctxp)
 {
+  *ctxp = NULL;
   // load clone info
   bufferlist bl;
   ObjectContextRef obc = get_object_context(coid, false, NULL);
-  if (!obc) {
-    derr << __func__ << "could not find coid " << coid << dendl;
-    assert(0);
+  if (!obc || !obc->ssc || !obc->ssc->exists) {
+    osd->clog->error() << __func__ << ": Can not trim " << coid
+      << " repair needed " << (obc ? "(no obc->ssc or !exists)" : "(no obc)");
+    return -ENOENT;
   }
-  assert(obc->ssc);
 
   hobject_t snapoid(
     coid.oid, coid.get_key(),
     obc->ssc->snapset.head_exists ? CEPH_NOSNAP:CEPH_SNAPDIR, coid.get_hash(),
     info.pgid.pool(), coid.get_namespace());
   ObjectContextRef snapset_obc = get_object_context(snapoid, false);
+  if (!snapset_obc) {
+    osd->clog->error() << __func__ << ": Can not trim " << coid
+      << " repair needed, no snapset obc for " << snapoid;
+    return -ENOENT;
+  }
 
   object_info_t &coi = obc->obs.oi;
   set<snapid_t> old_snaps(coi.snaps.begin(), coi.snaps.end());
   if (old_snaps.empty()) {
     osd->clog->error() << __func__ << " No object info snaps for " << coid << "\n";
-    return NULL;
+    return -ENOENT;
   }
 
   SnapSet& snapset = obc->ssc->snapset;
@@ -3413,7 +3420,7 @@ ReplicatedPG::OpContextUPtr ReplicatedPG::trim_object(const hobject_t &coid)
 	   << " old snapset " << snapset << dendl;
   if (snapset.seq == 0) {
     osd->clog->error() << __func__ << " No snapset.seq for " << coid << "\n";
-    return NULL;
+    return -ENOENT;
   }
 
   set<snapid_t> new_snaps;
@@ -3430,7 +3437,7 @@ ReplicatedPG::OpContextUPtr ReplicatedPG::trim_object(const hobject_t &coid)
     p = std::find(snapset.clones.begin(), snapset.clones.end(), coid.snap);
     if (p == snapset.clones.end()) {
       osd->clog->error() << __func__ << " Snap " << coid.snap << " not in clones" << "\n";
-      return NULL;
+      return -ENOENT;
     }
   }
 
@@ -3442,7 +3449,7 @@ ReplicatedPG::OpContextUPtr ReplicatedPG::trim_object(const hobject_t &coid)
 	obc)) {
     close_op_ctx(ctx.release());
     dout(10) << __func__ << ": Unable to get a wlock on " << coid << dendl;
-    return NULL;
+    return -ENOLCK;
   }
 
   if (!ctx->lock_manager.get_snaptrimmer_write(
@@ -3450,7 +3457,7 @@ ReplicatedPG::OpContextUPtr ReplicatedPG::trim_object(const hobject_t &coid)
 	snapset_obc)) {
     close_op_ctx(ctx.release());
     dout(10) << __func__ << ": Unable to get a wlock on " << snapoid << dendl;
-    return NULL;
+    return -ENOLCK;
   }
 
   ctx->at_version = get_next_version();
@@ -3633,7 +3640,8 @@ ReplicatedPG::OpContextUPtr ReplicatedPG::trim_object(const hobject_t &coid)
     }
   }
 
-  return ctx;
+  *ctxp = std::move(ctx);
+  return 0;
 }
 
 void ReplicatedPG::snap_trimmer(epoch_t queued)
@@ -3646,7 +3654,6 @@ void ReplicatedPG::snap_trimmer(epoch_t queued)
   if (is_primary()) {
     if (scrubber.active) {
       dout(10) << " scrubbing, will requeue snap_trimmer after" << dendl;
-      scrubber.queue_snap_trim = true;
       return;
     }
 
@@ -8963,6 +8970,7 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
 	object_info_t oi(soid);
 	SnapSetContext *ssc = get_snapset_context(
 	  soid, true, 0, false);
+	assert(ssc);
 	obc = create_object_context(oi, ssc);
 	dout(10) << __func__ << ": " << obc << " " << soid
 		 << " " << obc->rwstate
@@ -9010,7 +9018,13 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     dout(10) << __func__ << ": creating obc from disk: " << obc
 	     << dendl;
   }
-  assert(obc->ssc);
+
+  // XXX: Caller doesn't expect this
+  if (obc->ssc == NULL) {
+    derr << __func__ << ": obc->ssc not available, not returning context" << dendl;
+    return ObjectContextRef();   // -ENOENT!
+  }
+
   dout(10) << __func__ << ": " << obc << " " << soid
 	   << " " << obc->rwstate
 	   << " oi: " << obc->obs.oi
@@ -9384,7 +9398,12 @@ SnapSetContext *ReplicatedPG::get_snapset_context(
     _register_snapset_context(ssc);
     if (bv.length()) {
       bufferlist::iterator bvp = bv.begin();
-      ssc->snapset.decode(bvp);
+      try {
+	ssc->snapset.decode(bvp);
+      } catch (buffer::error& e) {
+        dout(0) << __func__ << " Can't decode snapset: " << e << dendl;
+	return NULL;
+      }
       ssc->exists = true;
     } else {
       ssc->exists = false;
@@ -13157,6 +13176,7 @@ ReplicatedPG::TrimmingObjects::TrimmingObjects(my_context ctx)
   auto *pg = context< SnapTrimmer >().pg;
   context< SnapTrimmer >().log_enter(state_name);
   pg->state_set(PG_STATE_SNAPTRIM);
+  pg->state_clear(PG_STATE_SNAPTRIM_ERROR);
   pg->publish_stats_to_osd();
 }
 
@@ -13201,14 +13221,21 @@ boost::statechart::result ReplicatedPG::TrimmingObjects::react(const SnapTrim&)
     }
 
     dout(10) << "TrimmingObjects react trimming " << pos << dendl;
-    OpContextUPtr ctx = pg->trim_object(pos);
-    if (!ctx) {
-      dout(10) << __func__ << " could not get write lock on obj "
-	       << pos << dendl;
-      pos = old_pos;
-      return discard_event();
+    OpContextUPtr ctx;
+    int error = pg->trim_object(pos, &ctx);
+    if (error) {
+      if (error == -ENOLCK) {
+	ldout(pg->cct, 10) << "could not get write lock on obj "
+			   << pos << dendl;
+        pos = old_pos;
+        return discard_event();
+      } else {
+	pg->state_set(PG_STATE_SNAPTRIM_ERROR);
+	ldout(pg->cct, 10) << "Snaptrim error=" << error << dendl;
+        return transit< NotTrimming >();
+      }
     }
-    assert(ctx);
+
     hobject_t to_remove = pos;
     ctx->register_on_success(
       [pg, to_remove, &in_flight]() {
