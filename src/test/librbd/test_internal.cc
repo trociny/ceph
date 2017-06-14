@@ -13,6 +13,7 @@
 #include "librbd/ObjectMap.h"
 #include "librbd/Operations.h"
 #include "librbd/api/DiffIterate.h"
+#include "librbd/image/CreateRequest.h"
 #include "librbd/io/AioCompletion.h"
 #include "librbd/io/ImageRequest.h"
 #include "librbd/io/ImageRequestWQ.h"
@@ -1619,6 +1620,235 @@ TEST_F(TestInternal, BlockAPIStress) {
   done = true;
   thrasher.join();
 
+  ASSERT_EQ(0, rbd_close(image));
+
+  rados_ioctx_destroy(ioctx);
+}
+
+TEST_F(TestInternal, LiveConvertToNewFormat) {
+  REQUIRE_FORMAT_V2();
+
+  // Create and open old format image
+
+  uint64_t features = 0;
+  int order = 0;
+  uint64_t size = 4 << 20;
+  std::string name = get_temp_image_name();
+  ASSERT_EQ(0, create_image_full_pp(m_rbd, m_ioctx, name, size, features, true,
+                                    &order));
+
+  rados_ioctx_t ioctx;
+  rados_ioctx_create(_cluster, m_ioctx.get_pool_name().c_str(), &ioctx);
+
+  rbd_image_t image;
+  ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, NULL));
+
+  rbd_image_info_t info;
+  ASSERT_EQ(0, rbd_stat(image, &info, sizeof(info)));
+  ASSERT_EQ(info.size, size);
+
+  // Do some IO
+
+  char test_data[TEST_IO_SIZE];
+  char read_data[TEST_IO_SIZE];
+  for (size_t i = 0; i < TEST_IO_SIZE; ++i) {
+    //test_data[i] = (char) (rand() % (126 - 33) + 33);
+    test_data[i] = 'X';
+  }
+  test_data[TEST_IO_SIZE - 1] = '\0';
+
+  size_t num_aios = 4;
+  rbd_completion_t comps[num_aios];
+  for (size_t i = 0; i < num_aios; ++i) {
+    ASSERT_EQ(0, rbd_aio_create_completion(NULL, NULL, &comps[i]));
+    uint64_t offset = rand() % (size - TEST_IO_SIZE);
+    ASSERT_EQ(0, rbd_aio_write(image, offset, TEST_IO_SIZE, test_data,
+                               comps[i]));
+  }
+  for (size_t i = 0; i < num_aios; ++i) {
+    ASSERT_EQ(0, rbd_aio_wait_for_complete(comps[i]));
+    rbd_aio_release(comps[i]);
+  }
+
+  for (size_t i = 0; i < num_aios; ++i) {
+    ASSERT_EQ(TEST_IO_SIZE, rbd_write(image, i * TEST_IO_SIZE, TEST_IO_SIZE, test_data));
+  }
+
+  // Block API and close image state
+  std::cout << "Block API and close image state" << std::endl;
+
+  librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+
+  C_SaferCond on_block;
+  ictx->block_api(&on_block);
+  ASSERT_EQ(0, on_block.wait());
+
+  for (size_t i = 0; i < num_aios; ++i) {
+    ASSERT_EQ(0, rbd_aio_create_completion(NULL, NULL, &comps[i]));
+    uint64_t offset = rand() % (size - TEST_IO_SIZE);
+    ASSERT_LE(0, rbd_aio_read(image, offset, TEST_IO_SIZE, read_data,
+                              comps[i]));
+  }
+
+  C_SaferCond on_close;
+  ictx->state->close(&on_close);
+  ASSERT_EQ(0, on_close.wait());
+
+  ictx->md_ctx.aio_flush();
+  ictx->data_ctx.aio_flush();
+  ictx->io_work_queue->drain();
+
+  if (ictx->object_cacher) {
+    delete ictx->object_cacher;
+    ictx->object_cacher = NULL;
+  }
+  if (ictx->perfcounter) {
+    ictx->perf_stop();
+    ictx->perfcounter = NULL;
+  }
+  if (ictx->object_cacher) {
+    delete ictx->object_cacher;
+    ictx->object_cacher = NULL;
+  }
+  if (ictx->writeback_handler) {
+    delete ictx->writeback_handler;
+    ictx->writeback_handler = NULL;
+  }
+  if (ictx->object_set) {
+    delete ictx->object_set;
+    ictx->object_set = NULL;
+  }
+  delete[] ictx->format_string;
+  ictx->format_string = NULL;
+
+  ThreadPool *thread_pool;
+  ictx->get_thread_pool_instance(ictx->cct, &thread_pool, &ictx->op_work_queue);
+
+  delete ictx->io_work_queue;
+  ictx->io_work_queue = new librbd::io::ImageRequestWQ(
+    ictx, "librbd::io_work_queue", ictx->cct->_conf->rbd_op_thread_timeout,
+    thread_pool);
+
+  delete ictx->state;
+  ictx->state = new librbd::ImageState<>(ictx);
+
+  // librbd::ImageCtx *parent_ictx;
+  // EXPECT_EQ(0, open_image(ictx->name, &parent_ictx));
+
+  // unlink old image in directory
+  ASSERT_EQ(0, librbd::tmap_rm(ictx->md_ctx, ictx->name));
+
+  // rename old image header
+  name = get_temp_image_name();
+
+  bufferlist header;
+  ASSERT_EQ(0, librbd::read_header_bl(ictx->md_ctx, ictx->header_oid, header,
+                                      nullptr));
+
+  string old_header_oid = librbd::util::old_header_name(name);
+  ASSERT_EQ(0, ictx->md_ctx.write(old_header_oid, header, header.length(), 0));
+  ASSERT_EQ(0, ictx->md_ctx.remove(ictx->header_oid));
+
+  std::cout << "Create new image and set old as parent" << std::endl;
+
+  // create new image
+
+  ASSERT_TRUE(get_features(&features));
+  // librbd::ImageOptions opts;
+  // opts.set(RBD_IMAGE_OPTION_FORMAT, static_cast<uint64_t>(2));
+  // opts.set(RBD_IMAGE_OPTION_ORDER, static_cast<uint64_t>(22));
+  // opts.set(RBD_IMAGE_OPTION_FEATURES, features);
+
+  // C_SaferCond on_create;
+  // auto req = librbd::image::CreateRequest<>::create(
+  //     m_ioctx, ictx->name, "", size, opts, "", "", true, ictx->op_work_queue,
+  //     &on_create);
+  // // req->set_object_prefix(ictx->object_prefix);
+  // req->send();
+  // ASSERT_EQ(0, on_create.wait());
+
+  //name = get_temp_image_name();
+  EXPECT_EQ(0, create_image_full_pp(m_rbd, m_ioctx, ictx->name, size, features,
+                                    false, &order));
+
+  // get new image header_oid
+  librbd::ImageCtx *ictx2;
+  EXPECT_EQ(0, open_image(ictx->name, &ictx2));
+  std::string header_oid = ictx2->header_oid;
+  close_image(ictx2);
+
+  // set old image as parent
+  librbd::ParentSpec pspec(ictx->md_ctx.get_id(), name /* XXXMG: old image name */, CEPH_NOSNAP);
+  librados::ObjectWriteOperation op1;
+  librbd::cls_client::set_parent(&op1, pspec, size);
+  std::cout << "header_oid=" << header_oid << std::endl;
+  ASSERT_EQ(0, ictx->md_ctx.operate(header_oid, &op1));
+
+  // Reopen and unblock API
+  std::cout << "Reopen and unblock API" << std::endl;
+
+  //ictx->name = name;
+  ictx->id.clear();
+  C_SaferCond on_open;
+  ictx->state->open(false, &on_open);
+  ASSERT_EQ(0, on_open.wait());
+
+  ictx->unblock_api();
+
+  ASSERT_EQ(0, rbd_stat(image, &info, sizeof(info)));
+  ASSERT_EQ(info.size, size);
+
+  // Release completions for aio started before block/unblock
+  std::cout << "Release completions for aio started before block/unblock" << std::endl;
+
+  for (size_t i = 0; i < num_aios; ++i) {
+    ASSERT_EQ(0, rbd_aio_wait_for_complete(comps[i]));
+    rbd_aio_release(comps[i]);
+  }
+
+  // check written data
+  std::cout << "Check written data" << std::endl;
+  for (size_t i = 0; i < num_aios; ++i) {
+    read_data[0] = '\0';
+    std::cout << "read, i = " << i << std::endl;
+    ASSERT_EQ(TEST_IO_SIZE, rbd_read(image, i * TEST_IO_SIZE, TEST_IO_SIZE, read_data));
+    std::cout << "test_data = " << std::string(test_data) << std::endl;
+    std::cout << "read_data = " << std::string(read_data) << std::endl;
+    ASSERT_EQ(0, memcmp(read_data, test_data, TEST_IO_SIZE));
+  }
+
+  // Do some IO
+  std::cout << "Do some IO" << std::endl;
+
+  for (size_t i = num_aios; i < 2 * num_aios; ++i) {
+    std::cout << "write, i = " << i << std::endl;
+    ASSERT_EQ(TEST_IO_SIZE, rbd_write(image, i * TEST_IO_SIZE, TEST_IO_SIZE, test_data));
+  }
+  for (size_t i = num_aios; i < 2 * num_aios; ++i) {
+    std::cout << "read, i = " << i << std::endl;
+    ASSERT_EQ(TEST_IO_SIZE, rbd_read(image, i * TEST_IO_SIZE, TEST_IO_SIZE, read_data));
+    ASSERT_EQ(0, memcmp(read_data, test_data, TEST_IO_SIZE));
+  }
+
+  for (size_t i = 0; i < num_aios; ++i) {
+    std::cout << "i = " << i << std::endl;
+    ASSERT_EQ(0, rbd_aio_create_completion(NULL, NULL, &comps[i]));
+    uint64_t offset = rand() % (size - TEST_IO_SIZE);
+    ASSERT_EQ(0, rbd_aio_write(image, offset, TEST_IO_SIZE, test_data,
+                               comps[i]));
+  }
+  std::cout << "Wait for complete" << std::endl;
+  for (size_t i = 0; i < num_aios; ++i) {
+    std::cout << "i = " << i << std::endl;
+    ASSERT_EQ(0, rbd_aio_wait_for_complete(comps[i]));
+    rbd_aio_release(comps[i]);
+  }
+
+  std::cout << "Flatten" << std::endl;
+  librbd::NoOpProgressContext no_op;
+  ASSERT_EQ(0, ictx->operations->flatten(no_op));
+
+  std::cout << "Close" << std::endl;
   ASSERT_EQ(0, rbd_close(image));
 
   rados_ioctx_destroy(ioctx);

@@ -507,21 +507,25 @@ void CreateRequest<I>::create_image() {
   ldout(m_cct, 20) << dendl;
   assert(m_data_pool.empty() || m_data_pool_id != -1);
 
-  ostringstream oss;
-  oss << RBD_DATA_PREFIX;
-  if (m_data_pool_id != -1) {
-    oss << stringify(m_ioctx.get_id()) << ".";
+  if (m_object_prefix.empty()) {
+    ostringstream oss;
+    oss << RBD_DATA_PREFIX;
+    if (m_data_pool_id != -1) {
+      oss << stringify(m_ioctx.get_id()) << ".";
+    }
+    oss << m_image_id;
+    m_object_prefix = oss.str();
   }
-  oss << m_image_id;
-  if (oss.str().length() > RBD_MAX_BLOCK_NAME_PREFIX_LENGTH) {
-    lderr(m_cct) << "object prefix '" << oss.str() << "' too large" << dendl;
+
+  if (m_object_prefix.length() > RBD_MAX_BLOCK_NAME_PREFIX_LENGTH) {
+    lderr(m_cct) << "object prefix '" << m_object_prefix << "' too large" << dendl;
     complete(-EINVAL);
     return;
   }
 
   librados::ObjectWriteOperation op;
   op.create(true);
-  cls_client::create_image(&op, m_size, m_order, m_features, oss.str(),
+  cls_client::create_image(&op, m_size, m_order, m_features, m_object_prefix,
                            m_data_pool_id);
 
   using klass = CreateRequest<I>;

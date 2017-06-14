@@ -45,6 +45,10 @@ public:
 
   static int validate_order(CephContext *cct, uint8_t order);
 
+  void set_object_prefix(const std::string &object_prefix) {
+    m_object_prefix = object_prefix;
+  }
+
   void send();
 
 private:
@@ -105,6 +109,7 @@ private:
   IoCtx m_data_io_ctx;
   std::string m_image_name;
   std::string m_image_id;
+  std::string m_object_prefix;
   uint64_t m_size;
   uint8_t m_order = 0;
   uint64_t m_features = 0;

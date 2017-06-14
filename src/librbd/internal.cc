@@ -26,6 +26,7 @@
 #include "librbd/ImageState.h"
 #include "librbd/internal.h"
 #include "librbd/Journal.h"
+#include "librbd/LibrbdWriteback.h"
 #include "librbd/ObjectMap.h"
 #include "librbd/Operations.h"
 #include "librbd/Types.h"
@@ -1927,6 +1928,167 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     r = throttle.wait_for_ret();
     if (r >= 0)
       prog_ctx.update_progress(src_size, src_size);
+    return r;
+  }
+
+  int migrate(ImageCtx *ictx, IoCtx& dest_md_ctx, const char *destname_,
+              ImageOptions& opts, ProgressContext &prog_ctx)
+  {
+    CephContext *cct = (CephContext *)dest_md_ctx.cct();
+    IoCtx &src_md_ctx = ictx->md_ctx;
+
+    std::string destname = (destname_ != nullptr && *destname_ != '\0') ?
+      destname_ : ictx->name.c_str();
+
+    ldout(cct, 20) << "migrate " << src_md_ctx.get_pool_name() << "/"
+                   << ictx->name << " -> " << dest_md_ctx.get_pool_name() << "/"
+                   << destname << " opts = " << opts << dendl;
+
+    ictx->snap_lock.get_read();
+    uint64_t features = ictx->features;
+    uint64_t size = ictx->get_image_size(ictx->snap_id);
+    ictx->snap_lock.put_read();
+    uint64_t format = ictx->old_format ? 1 : 2;
+    if (opts.get(RBD_IMAGE_OPTION_FORMAT, &format) != 0) {
+      opts.set(RBD_IMAGE_OPTION_FORMAT, format);
+    }
+
+    if (format != 2) {
+      lderr(cct) << "unsupported destination image format: " << format << dendl;
+      return -EINVAL;
+    }
+
+    uint64_t stripe_unit = ictx->stripe_unit;
+    if (opts.get(RBD_IMAGE_OPTION_STRIPE_UNIT, &stripe_unit) != 0) {
+      opts.set(RBD_IMAGE_OPTION_STRIPE_UNIT, stripe_unit);
+    }
+    uint64_t stripe_count = ictx->stripe_count;
+    if (opts.get(RBD_IMAGE_OPTION_STRIPE_COUNT, &stripe_count) != 0) {
+      opts.set(RBD_IMAGE_OPTION_STRIPE_COUNT, stripe_count);
+    }
+    uint64_t order = ictx->order;
+    if (opts.get(RBD_IMAGE_OPTION_ORDER, &order) != 0) {
+      opts.set(RBD_IMAGE_OPTION_ORDER, order);
+    }
+    if (opts.get(RBD_IMAGE_OPTION_FEATURES, &features) != 0) {
+      opts.set(RBD_IMAGE_OPTION_FEATURES, features);
+    }
+    if (features & ~RBD_FEATURES_ALL) {
+      lderr(cct) << "librbd does not support requested features" << dendl;
+      return -ENOSYS;
+    }
+
+    int r = 0;
+
+    C_SaferCond on_close;
+    ictx->state->close(&on_close);
+    r = on_close.wait();
+    assert(r == 0); // XXXMG
+
+    src_md_ctx.aio_flush();
+    ictx->data_ctx.aio_flush();
+    ictx->io_work_queue->drain();
+
+    if (ictx->object_cacher) {
+      delete ictx->object_cacher;
+      ictx->object_cacher = NULL;
+    }
+    if (ictx->perfcounter) {
+      ictx->perf_stop();
+      ictx->perfcounter = NULL;
+    }
+    if (ictx->object_cacher) {
+      delete ictx->object_cacher;
+      ictx->object_cacher = NULL;
+    }
+    if (ictx->writeback_handler) {
+      delete ictx->writeback_handler;
+      ictx->writeback_handler = NULL;
+    }
+    if (ictx->object_set) {
+      delete ictx->object_set;
+      ictx->object_set = NULL;
+    }
+    delete[] ictx->format_string;
+    ictx->format_string = NULL;
+
+    ThreadPool *thread_pool;
+    ictx->get_thread_pool_instance(ictx->cct, &thread_pool,
+                                  &ictx->op_work_queue);
+
+    delete ictx->io_work_queue;
+    ictx->io_work_queue = new io::ImageRequestWQ(
+      ictx, "librbd::io_work_queue", ictx->cct->_conf->rbd_op_thread_timeout,
+      thread_pool);
+
+    delete ictx->state;
+    ictx->state = new ImageState<>(ictx);
+
+    std::string parent;
+    bool old_format = ictx->old_format;
+
+    if (old_format) {
+      parent = ".migration." + ictx->name; // XXXMG
+
+      r = tmap_rm(src_md_ctx, ictx->name);
+      assert(r == 0); // XXXMG
+
+      bufferlist header;
+      r = read_header_bl(src_md_ctx, ictx->header_oid, header, nullptr);
+      assert(r == 0); // XXXMG
+
+      string old_header_oid = util::old_header_name(parent);
+      r = src_md_ctx.write(old_header_oid, header, header.length(), 0);
+      assert(r == 0); // XXXMG
+
+      r = src_md_ctx.remove(ictx->header_oid);
+      assert(r == 0); // XXXMG
+    } else {
+      parent = ictx->id;
+
+      r = trash_move(src_md_ctx, RBD_TRASH_IMAGE_SOURCE_USER, ictx->name, 0);
+      assert(r == 0); // XXXMG
+    }
+
+    std::string image_id = util::generate_image_id(dest_md_ctx);
+
+    r = create(dest_md_ctx, destname.c_str(), image_id, size, opts, "", "",
+               false);
+    if (r < 0) {
+      lderr(cct) << "header creation failed" << dendl;
+      return r;
+    }
+    opts.set(RBD_IMAGE_OPTION_ORDER, static_cast<uint64_t>(order));
+
+    // set old image as parent
+    ParentSpec pspec(src_md_ctx.get_id(), parent, CEPH_NOSNAP);
+    r = cls_client::set_parent(&dest_md_ctx, util::header_name(image_id), pspec,
+                               size);
+    assert(r == 0); // XXXMG
+
+    ictx->name = destname;
+    ictx->id = image_id;
+    ictx->md_ctx = dest_md_ctx;
+
+    C_SaferCond on_open;
+    ictx->state->open(false, &on_open);
+    r = on_open.wait();
+    assert(r == 0); // XXXMG
+    if (r < 0) {
+      lderr(cct) << "failed to read newly created header" << dendl;
+    }
+
+    r = ictx->operations->flatten(prog_ctx);
+    assert(r == 0); // XXXMG
+
+    if (old_format) {
+      librbd::NoOpProgressContext noopprog_ctx;
+      int remove_r = remove(src_md_ctx, parent, "", noopprog_ctx, false, false);
+      if (remove_r < 0) {
+        // ignore
+      }
+    }
+
     return r;
   }
 

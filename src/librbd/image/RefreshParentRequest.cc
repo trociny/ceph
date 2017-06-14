@@ -106,8 +106,15 @@ void RefreshParentRequest<I>::send_open_parent() {
 
   // since we don't know the image and snapshot name, set their ids and
   // reset the snap_name and snap_exists fields after we read the header
-  m_parent_image_ctx = new I("", m_parent_md.spec.image_id, NULL, parent_io_ctx,
-                             true);
+  if (/*false &&*/ m_parent_md.spec.snap_id == CEPH_NOSNAP) {
+    // old format image
+    ldout(cct, 0) << this << " " << __func__ << " XXXMG: handling old format parent" << dendl;
+    m_parent_image_ctx = new I(m_parent_md.spec.image_id, "", NULL, parent_io_ctx,
+                               true);
+  } else {
+    m_parent_image_ctx = new I("", m_parent_md.spec.image_id, NULL, parent_io_ctx,
+                               true);
+  }
 
   // set rados flags for reading the parent image
   if (m_child_image_ctx.balance_parent_reads) {
@@ -138,6 +145,11 @@ Context *RefreshParentRequest<I>::handle_open_parent(int *result) {
     delete m_parent_image_ctx;
     m_parent_image_ctx = nullptr;
 
+    return m_on_finish;
+  }
+
+  if (m_parent_md.spec.snap_id == CEPH_NOSNAP) {
+    ldout(cct, 0) << this << " " << __func__ << " XXXMG: handling old format parent, return m_on_finish" << dendl;
     return m_on_finish;
   }
 

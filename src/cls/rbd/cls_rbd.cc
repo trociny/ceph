@@ -938,6 +938,12 @@ int get_parent(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 	return r;
       parent = snap.parent;
     }
+  } else if (snap_id == CEPH_NOSNAP) {
+    // XXXMG: upgrade case
+    r = read_key(hctx, "parent", &parent);
+    if (r < 0 && r != -ENOENT) {
+	return r;
+    }
   }
 
   ::encode(parent.pool, *out);
@@ -983,7 +989,7 @@ int set_parent(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   }
 
   r = require_feature(hctx, RBD_FEATURE_LAYERING);
-  if (r < 0) {
+  if (r < 0 && snapid != CEPH_NOSNAP) {
     CLS_LOG(20, "cls_rbd::set_parent: child does not support layering");
     return r;
   }
@@ -992,7 +998,7 @@ int set_parent(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 	  (unsigned long long)pool, id.c_str(), (unsigned long long)snapid.val,
 	  (unsigned long long)size);
 
-  if (pool < 0 || id.length() == 0 || snapid == CEPH_NOSNAP || size == 0) {
+  if (pool < 0 || id.length() == 0 /* || snapid == CEPH_NOSNAP */ || size == 0) {
     return -EINVAL;
   }
 
@@ -1043,8 +1049,10 @@ int remove_parent(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return r;
 
   r = require_feature(hctx, RBD_FEATURE_LAYERING);
-  if (r < 0)
-    return r;
+  if (r < 0) {
+    // XXXMG
+    //return r;
+  }
 
   uint64_t features;
   r = read_key(hctx, "features", &features);

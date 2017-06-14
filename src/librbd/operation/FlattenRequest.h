@@ -31,6 +31,13 @@ protected:
   void send_op() override;
   bool should_complete(int r) override;
 
+  int filter_return_code(int r) const override {
+    if (r == -ENOENT && m_ignore_enoent) {
+      return 0;
+    }
+    return r;
+  }
+
   journal::Event create_event(uint64_t op_tid) const override {
     return journal::FlattenEvent(op_tid);
   }

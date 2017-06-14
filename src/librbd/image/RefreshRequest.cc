@@ -285,6 +285,11 @@ Context *RefreshRequest<I>::handle_v2_get_mutable_metadata(int *result) {
     m_incomplete_update = true;
   }
 
+  ldout(cct, 10) << this << " " << __func__ << ": " << "m_parent_md.spec.pool_id = " << m_parent_md.spec.pool_id << dendl;
+  ldout(cct, 10) << this << " " << __func__ << ": " << "m_parent_md.spec.image_id = " << m_parent_md.spec.image_id << dendl;
+  ldout(cct, 10) << this << " " << __func__ << ": " << "m_parent_md.spec.snap_id = " << m_parent_md.spec.snap_id << dendl;
+  ldout(cct, 10) << this << " " << __func__ << ": " << "m_parent_md.overlap = " << m_parent_md.overlap << dendl;
+
   send_v2_get_flags();
   return nullptr;
 }
@@ -537,12 +542,17 @@ Context *RefreshRequest<I>::handle_v2_get_snap_namespaces(int *result) {
 
 template <typename I>
 void RefreshRequest<I>::send_v2_refresh_parent() {
+  CephContext *cct = m_image_ctx.cct;
+  ldout(cct, 10) << this << " " << __func__ << ": XXXMG: m_skip_open_parent_image = " << m_skip_open_parent_image  << dendl;
   {
     RWLock::RLocker snap_locker(m_image_ctx.snap_lock);
     RWLock::RLocker parent_locker(m_image_ctx.parent_lock);
 
     ParentInfo parent_md;
     int r = get_parent_info(m_image_ctx.snap_id, &parent_md);
+    ldout(cct, 10) << this << " " << __func__ << ": XXXMG: get_parent_info = " << r << dendl;
+    ldout(cct, 10) << this << " " << __func__ << ": XXXMG: m_image_ctx.snap_id = " << m_image_ctx.snap_id << dendl;
+    ldout(cct, 10) << this << " " << __func__ << ": XXXMG: is_refresh_required = " << RefreshParentRequest<I>::is_refresh_required(m_image_ctx, parent_md) << dendl;
     if (!m_skip_open_parent_image && (r < 0 ||
         RefreshParentRequest<I>::is_refresh_required(m_image_ctx, parent_md))) {
       CephContext *cct = m_image_ctx.cct;

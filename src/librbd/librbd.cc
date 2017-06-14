@@ -1302,6 +1302,34 @@ namespace librbd {
     return r;
   }
 
+  int Image::migrate(IoCtx& dest_io_ctx, const char *destname,
+                     ImageOptions& opts)
+  {
+    ImageCtx *ictx = (ImageCtx *)ctx;
+    tracepoint(librbd, migrate_enter, ictx, ictx->name.c_str(),
+               ictx->snap_name.c_str(), ictx->read_only,
+               dest_io_ctx.get_pool_name().c_str(), dest_io_ctx.get_id(),
+               destname, opts.opts);
+    librbd::NoOpProgressContext prog_ctx;
+    int r = librbd::migrate(ictx, dest_io_ctx, destname, opts, prog_ctx);
+    tracepoint(librbd, migrate_exit, r);
+    return r;
+  }
+
+  int Image::migrate_with_progress(IoCtx& dest_io_ctx, const char *destname,
+                                   ImageOptions& opts,
+                                   librbd::ProgressContext &pctx)
+  {
+    ImageCtx *ictx = (ImageCtx *)ctx;
+    tracepoint(librbd, migrate_enter, ictx, ictx->name.c_str(),
+               ictx->snap_name.c_str(), ictx->read_only,
+               dest_io_ctx.get_pool_name().c_str(), dest_io_ctx.get_id(),
+               destname, opts.opts);
+    int r = librbd::migrate(ictx, dest_io_ctx, destname, opts, pctx);
+    tracepoint(librbd, migrate_exit, r);
+    return r;
+  }
+
   int Image::flatten()
   {
     ImageCtx *ictx = (ImageCtx *)ctx;
