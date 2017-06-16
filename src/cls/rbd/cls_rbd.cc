@@ -5305,6 +5305,82 @@ int trash_get(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   return r;
 }
 
+/**
+ * Set migrate image spec.
+ *
+ * Input:
+ * @param migrate_spec migration image spec
+ *
+ * Output:
+ *
+ * @returns -EEXIST if migrate header already exists
+ * @returns 0 on success, negative error code on failure
+ */
+int migrate_set(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+  cls::rbd::MigrateSpec migrate_spec;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(migrate_spec, it);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  bufferlist bl;
+  int r = cls_cxx_map_get_val(hctx, "migrate", &bl);
+  if (r != -ENOENT) {
+    if (r == 0) {
+      return -EEXIST;
+    }
+    CLS_ERR("error retrieving migrate: %s", cpp_strerror(r).c_str());
+    return r;
+  }
+
+  bl.clear();
+  ::encode(migrate_spec, bl);
+  r = cls_cxx_map_set_val(hctx, "migrate", &bl);
+  if (r < 0) {
+    CLS_ERR("error setting migrate: %s", cpp_strerror(r).c_str());
+    return r;
+  }
+
+  return 0;
+}
+
+/**
+ * Get migrate image spec.
+ *
+ * Input:
+ *
+ * Output:
+ * @param migrate_spec migration image spec
+ *
+ * @returns 0 on success, negative error code on failure
+ */
+int migrate_get(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+  cls::rbd::MigrateSpec migrate_spec;
+  int r = read_key(hctx, "migrate", &migrate_spec);
+  if (r < 0) {
+    return r;
+  }
+
+  ::encode(migrate_spec, *out);
+  return 0;
+}
+
+/**
+ * Remove migrate image spec.
+ *
+ * Input:
+ *
+ * Output:
+ * @param migrate_spec migration image spec
+ *
+ * @returns 0 on success, negative error code on failure
+ */
+int migrate_remove(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+  return remove_key(hctx, "migrate");
+}
+
 CLS_INIT(rbd)
 {
   CLS_LOG(20, "Loaded rbd class!");
@@ -5403,6 +5479,9 @@ CLS_INIT(rbd)
   cls_method_handle_t h_trash_remove;
   cls_method_handle_t h_trash_list;
   cls_method_handle_t h_trash_get;
+  cls_method_handle_t h_migrate_set;
+  cls_method_handle_t h_migrate_get;
+  cls_method_handle_t h_migrate_remove;
 
   cls_register("rbd", &h_class);
   cls_register_cxx_method(h_class, "create",
@@ -5694,6 +5773,17 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "trash_get",
                           CLS_METHOD_RD,
                           trash_get, &h_trash_get);
+
+  /* rbd_migrate object methods */
+  cls_register_cxx_method(h_class, "migrate_set",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          migrate_set, &h_migrate_set);
+  cls_register_cxx_method(h_class, "migrate_get",
+                          CLS_METHOD_RD,
+                          migrate_get, &h_migrate_get);
+  cls_register_cxx_method(h_class, "migrate_remove",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          migrate_remove, &h_migrate_remove);
 
   return;
 }

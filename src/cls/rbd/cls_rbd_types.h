@@ -391,6 +391,58 @@ std::ostream& operator<<(std::ostream& os, const MirrorImageMap &image_map);
 
 WRITE_CLASS_ENCODER(MirrorImageMap);
 
+enum MigrateType {
+  MIGRATE_TYPE_UNDEFINED = -1,
+  MIGRATE_TYPE_SRC = 0,
+  MIGRATE_TYPE_DST = 1,
+};
+
+inline void encode(const MigrateType &type, bufferlist& bl,
+                   uint64_t features=0) {
+  ::encode(static_cast<uint8_t>(type), bl);
+}
+
+inline void decode(MigrateType &type, bufferlist::iterator& it) {
+  uint8_t int_type;
+  ::decode(int_type, it);
+  type = static_cast<MigrateType>(int_type);
+}
+
+std::ostream& operator<<(std::ostream& os, const MigrateType& migrate_type);
+
+struct MigrateSpec {
+  MigrateType type = MIGRATE_TYPE_UNDEFINED;
+  int64_t pool_id = 0;
+  std::string image_name;
+  std::string image_id;
+  std::map<uint64_t, uint64_t> snap_seqs;
+
+  MigrateSpec() {
+  }
+  MigrateSpec(MigrateType type, int64_t pool_id, const std::string &image_name,
+              const std::string &image_id,
+              const std::map<uint64_t, uint64_t> &snap_seqs)
+    : type(type), pool_id(pool_id), image_name(image_name), image_id(image_id),
+      snap_seqs(snap_seqs) {
+  }
+
+  void encode(bufferlist &bl) const;
+  void decode(bufferlist::iterator& it);
+  void dump(Formatter *f) const;
+
+  static void generate_test_instances(std::list<MigrateSpec*> &o);
+
+  inline bool operator==(const MigrateSpec& ms) const {
+    return type == ms.type && pool_id == ms.pool_id &&
+      image_name == ms.image_name && image_id == ms.image_id &&
+      snap_seqs == ms.snap_seqs;
+  }
+};
+
+std::ostream& operator<<(std::ostream& os, const MigrateSpec& migrate_spec);
+
+WRITE_CLASS_ENCODER(MigrateSpec);
+
 } // namespace rbd
 } // namespace cls
 

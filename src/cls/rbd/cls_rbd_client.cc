@@ -2170,5 +2170,64 @@ namespace librbd {
       return trash_get_finish(&it, trash_spec);
     }
 
+    int migrate_set(librados::IoCtx *ioctx, const std::string &oid,
+                    const cls::rbd::MigrateSpec &migrate_spec) {
+      librados::ObjectWriteOperation op;
+      migrate_set(&op, migrate_spec);
+      return ioctx->operate(oid, &op);
+    }
+
+    void migrate_set(librados::ObjectWriteOperation *op,
+                     const cls::rbd::MigrateSpec &migrate_spec) {
+      bufferlist bl;
+      ::encode(migrate_spec, bl);
+      op->exec("rbd", "migrate_set", bl);
+    }
+
+    void migrate_get_start(librados::ObjectReadOperation *op) {
+      bufferlist bl;
+      op->exec("rbd", "migrate_get", bl);
+    }
+
+    int migrate_get_finish(bufferlist::iterator *it,
+                           cls::rbd::MigrateSpec *migrate_spec) {
+      try {
+	::decode(*migrate_spec, *it);
+      } catch (const buffer::error &err) {
+	return -EBADMSG;
+      }
+      return 0;
+    }
+
+    int migrate_get(librados::IoCtx *ioctx, const std::string &oid,
+                    cls::rbd::MigrateSpec *migrate_spec) {
+      librados::ObjectReadOperation op;
+      migrate_get_start(&op);
+
+      bufferlist out_bl;
+      int r = ioctx->operate(oid, &op, &out_bl);
+      if (r < 0) {
+	return r;
+      }
+
+      bufferlist::iterator iter = out_bl.begin();
+      r = migrate_get_finish(&iter, migrate_spec);
+      if (r < 0) {
+	return r;
+      }
+      return 0;
+    }
+
+    int migrate_remove(librados::IoCtx *ioctx, const std::string &oid) {
+      librados::ObjectWriteOperation op;
+      migrate_remove(&op);
+      return ioctx->operate(oid, &op);
+    }
+
+    void migrate_remove(librados::ObjectWriteOperation *op) {
+      bufferlist bl;
+      op->exec("rbd", "migrate_remove", bl);
+    }
+
   } // namespace cls_client
 } // namespace librbd
