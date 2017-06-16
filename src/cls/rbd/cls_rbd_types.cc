@@ -524,5 +524,76 @@ std::ostream& operator<<(std::ostream& os,
             << "instance_id=" << image_map.instance_id << "]";
 }
 
+std::ostream& operator<<(std::ostream& os, const MigrateType& migrate_type) {
+  switch (migrate_type) {
+  case MIGRATE_TYPE_SRC:
+    os << "source";
+    break;
+  case MIGRATE_TYPE_DST:
+    os << "destination";
+    break;
+  default:
+    os << "unknown (" << static_cast<uint32_t>(migrate_type) << ")";
+    break;
+  }
+  return os;
+}
+
+void MigrateSpec::encode(bufferlist& bl) const {
+  ENCODE_START(1, 1, bl);
+  ::encode(type, bl);
+  ::encode(pool_id, bl);
+  ::encode(image_name, bl);
+  ::encode(image_id, bl);
+  ::encode(snap_seqs, bl);
+  ENCODE_FINISH(bl);
+}
+
+void MigrateSpec::decode(bufferlist::iterator& bl) {
+  DECODE_START(1, bl);
+  ::decode(type, bl);
+  ::decode(pool_id, bl);
+  ::decode(image_name, bl);
+  ::decode(image_id, bl);
+  ::decode(snap_seqs, bl);
+  DECODE_FINISH(bl);
+}
+
+std::ostream& operator<<(std::ostream& os,
+                         const std::map<uint64_t, uint64_t>& snap_seqs) {
+  os << "{";
+  size_t count = 0;
+  for (auto &it : snap_seqs) {
+    os << "(" << (count++ > 0 ? ", " : "") << it.first << ", " << it.second
+       << ")";
+  }
+  os << "}";
+  return os;
+}
+
+void MigrateSpec::dump(Formatter *f) const {
+  f->dump_stream("type") << type;
+  f->dump_int("pool_id", pool_id);
+  f->dump_string("image_name", image_name);
+  f->dump_string("image_id", image_id);
+  f->dump_stream("snap_seqs") << snap_seqs;
+}
+
+void MigrateSpec::generate_test_instances(std::list<MigrateSpec*> &o) {
+  o.push_back(new MigrateSpec());
+  o.push_back(new MigrateSpec(MIGRATE_TYPE_SRC, 1, "image_name", "image_id",
+                              {{1, 2}}));
+}
+
+std::ostream& operator<<(std::ostream& os, const MigrateSpec& migrate_spec) {
+  os << "["
+     << "type=" << migrate_spec.type << ", "
+     << "pool_id=" << migrate_spec.pool_id << ", "
+     << "image_name=" << migrate_spec.image_name << ", "
+     << "image_id=" << migrate_spec.image_id << ", "
+     << "snap_seqs=" << migrate_spec.snap_seqs << "]";
+  return os;
+}
+
 } // namespace rbd
 } // namespace cls
