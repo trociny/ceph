@@ -13082,6 +13082,9 @@ void ReplicatedPG::_scrub_finish()
       share_pg_info();
     }
   }
+  // Clear object context cache to get repair information
+  if (repair)
+    object_contexts.clear();
 }
 
 /*---SnapTrimmer Logging---*/
