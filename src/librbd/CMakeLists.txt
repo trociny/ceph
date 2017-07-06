@@ -34,6 +34,7 @@ set(librbd_internal_srcs
   exclusive_lock/StandardPolicy.cc
   image/CloneRequest.cc
   image/CloseRequest.cc
+  image/CopyRequest.cc
   image/CreateRequest.cc
   image/OpenRequest.cc
   image/RefreshParentRequest.cc
@@ -41,6 +42,10 @@ set(librbd_internal_srcs
   image/RemoveRequest.cc
   image/SetFlagsRequest.cc
   image/SetSnapRequest.cc
+  image_copy/ImageCopyRequest.cc
+  image_copy/ObjectCopyRequest.cc
+  image_copy/SnapshotCopyRequest.cc
+  image_copy/SnapshotCreateRequest.cc
   image_watcher/NotifyLockOwner.cc
   io/AioCompletion.cc
   io/AsyncOperation.cc

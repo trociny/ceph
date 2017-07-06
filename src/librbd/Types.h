@@ -68,6 +68,8 @@ struct SnapInfo {
   }
 };
 
+typedef std::map<uint64_t, uint64_t> SnapSeqs;
+
 } // namespace librbd
 
 #endif // LIBRBD_TYPES_H

@@ -34,6 +34,7 @@
 #include "librbd/exclusive_lock/AutomaticPolicy.h"
 #include "librbd/exclusive_lock/StandardPolicy.h"
 #include "librbd/image/CloneRequest.h"
+#include "librbd/image/CopyRequest.h"
 #include "librbd/image/CreateRequest.h"
 #include "librbd/image/RemoveRequest.h"
 #include "librbd/io/AioCompletion.h"
@@ -1928,6 +1929,127 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     if (r >= 0)
       prog_ctx.update_progress(src_size, src_size);
     return r;
+  }
+
+  int copy_deep(ImageCtx *src, IoCtx& dest_md_ctx, const char *destname,
+                ImageOptions& opts, ProgressContext &prog_ctx)
+  {
+    CephContext *cct = (CephContext *)dest_md_ctx.cct();
+    ldout(cct, 20) << "copy_deep " << src->name
+		   << (src->snap_name.length() ? "@" + src->snap_name : "")
+		   << " -> " << destname << " opts = " << opts << dendl;
+
+    uint64_t features;
+    uint64_t src_size;
+    {
+      RWLock::RLocker snap_locker(src->snap_lock);
+
+      if (src->snap_id == CEPH_NOSNAP) {
+        lderr(cct) << "copy deep requires snapshot" << dendl;
+        return -EINVAL;
+      }
+
+      features = src->features;
+      src_size = src->get_image_size(src->snap_id);
+    }
+    uint64_t format = src->old_format ? 1 : 2;
+    if (opts.get(RBD_IMAGE_OPTION_FORMAT, &format) != 0) {
+      opts.set(RBD_IMAGE_OPTION_FORMAT, format);
+    }
+    uint64_t stripe_unit = src->stripe_unit;
+    if (opts.get(RBD_IMAGE_OPTION_STRIPE_UNIT, &stripe_unit) != 0) {
+      opts.set(RBD_IMAGE_OPTION_STRIPE_UNIT, stripe_unit);
+    }
+    uint64_t stripe_count = src->stripe_count;
+    if (opts.get(RBD_IMAGE_OPTION_STRIPE_COUNT, &stripe_count) != 0) {
+      opts.set(RBD_IMAGE_OPTION_STRIPE_COUNT, stripe_count);
+    }
+    uint64_t order = src->order;
+    if (opts.get(RBD_IMAGE_OPTION_ORDER, &order) != 0) {
+      opts.set(RBD_IMAGE_OPTION_ORDER, order);
+    }
+    if (opts.get(RBD_IMAGE_OPTION_FEATURES, &features) != 0) {
+      opts.set(RBD_IMAGE_OPTION_FEATURES, features);
+    }
+    if (features & ~RBD_FEATURES_ALL) {
+      lderr(cct) << "librbd does not support requested features" << dendl;
+      return -ENOSYS;
+    }
+
+    int r = create(dest_md_ctx, destname, "", src_size, opts, "", "", false);
+    if (r < 0) {
+      lderr(cct) << "header creation failed" << dendl;
+      return r;
+    }
+    opts.set(RBD_IMAGE_OPTION_ORDER, static_cast<uint64_t>(order));
+
+    ImageCtx *dest = new librbd::ImageCtx(destname, "", NULL,
+					  dest_md_ctx, false);
+    r = dest->state->open(false);
+    if (r < 0) {
+      lderr(cct) << "failed to read newly created header" << dendl;
+      return r;
+    }
+
+    C_SaferCond lock_ctx;
+    {
+      RWLock::WLocker locker(dest->owner_lock);
+
+      if (dest->exclusive_lock == nullptr) {
+	lderr(cct) << "exclusive-lock feature is not enabled" << dendl;
+	return -EINVAL;
+      }
+
+      if (dest->exclusive_lock->is_lock_owner()) {
+        ldout(cct, 20) << "XXXMG: is_lock_owner" << dendl;
+        lock_ctx.complete(0);
+      } else {
+        dest->exclusive_lock->acquire_lock(&lock_ctx);
+      }
+    }
+
+    r = lock_ctx.wait();
+    if (r < 0) {
+      lderr(cct) << "failed to request exclusive lock: " << cpp_strerror(r)
+		 << dendl;
+      return r;
+    }
+
+    r = copy_deep(src, dest, prog_ctx);
+
+    int close_r = dest->state->close();
+    if (r == 0 && close_r < 0) {
+      r = close_r;
+    }
+    return r;
+  }
+
+  int copy_deep(ImageCtx *src, ImageCtx *dest, ProgressContext &prog_ctx)
+  {
+    CephContext *cct = src->cct;
+    {
+      RWLock::RLocker snap_locker(src->snap_lock);
+
+      if (src->snap_id == CEPH_NOSNAP) {
+        lderr(cct) << "copy deep requires snapshot" << dendl;
+        return -EINVAL;
+      }
+    }
+
+    ThreadPool *thread_pool;
+    ContextWQ *op_work_queue;
+    ImageCtx::get_thread_pool_instance(cct, &thread_pool, &op_work_queue);
+
+    C_SaferCond cond;
+    auto req = image::CopyRequest<>::create(src, dest, op_work_queue, &prog_ctx,
+                                            &cond);
+    req->send();
+    int r = cond.wait();
+    if (r < 0) {
+      return r;
+    }
+
+    return 0;
   }
 
   int snap_set(ImageCtx *ictx, const cls::rbd::SnapshotNamespace &snap_namespace,

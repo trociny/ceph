@@ -167,6 +167,10 @@ namespace librbd {
 	   ImageOptions& opts, ProgressContext &prog_ctx, size_t sparse_size);
   int copy(ImageCtx *src, ImageCtx *dest, ProgressContext &prog_ctx, size_t sparse_size);
 
+  int copy_deep(ImageCtx *ictx, IoCtx& dest_md_ctx, const char *destname,
+                ImageOptions& opts, ProgressContext &prog_ctx);
+  int copy_deep(ImageCtx *src, ImageCtx *dest, ProgressContext &prog_ctx);
+
   /* cooperative locking */
   int list_lockers(ImageCtx *ictx,
 		   std::list<locker_t> *locks,

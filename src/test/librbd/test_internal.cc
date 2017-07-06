@@ -1261,3 +1261,91 @@ TEST_F(TestInternal, FlattenNoEmptyObjects)
 
   rados_ioctx_destroy(d_ioctx);
 }
+
+TEST_F(TestInternal, TestCopyDeep)
+{
+  REQUIRE_FEATURE(RBD_FEATURE_LAYERING | RBD_FEATURE_EXCLUSIVE_LOCK); // XXXMG
+
+  librbd::ImageCtx *src_ictx;
+  ASSERT_EQ(0, open_image(m_image_name, &src_ictx));
+
+  librbd::NoOpProgressContext no_op;
+  ASSERT_EQ(0, src_ictx->operations->resize((1 << src_ictx->order) * 10, true,
+                                            no_op));
+
+  bufferlist bl;
+  bl.append(std::string((1 << src_ictx->order * 2) + 1, '1'));
+  ASSERT_EQ((ssize_t)bl.length(), src_ictx->io_work_queue->write(
+              0 * bl.length(), bl.length(), bufferlist{bl}, 0));
+  ASSERT_EQ((ssize_t)bl.length(), src_ictx->io_work_queue->write(
+              2 * bl.length(), bl.length(), bufferlist{bl}, 0));
+  ASSERT_EQ(0, librbd::flush(src_ictx));
+
+  ASSERT_EQ(0, snap_create(*src_ictx, "snap1"));
+
+  ASSERT_EQ((ssize_t)bl.length(), src_ictx->io_work_queue->write(
+              1 * bl.length(), bl.length(), bufferlist{bl}, 0));
+  ASSERT_EQ(0, librbd::flush(src_ictx));
+
+  ASSERT_EQ(0, snap_create(*src_ictx, "copy"));
+
+  ASSERT_EQ(0, librbd::snap_set(src_ictx, cls::rbd::UserSnapshotNamespace(),
+                                "copy"));
+
+  std::string dst_name = get_temp_image_name();
+  librbd::ImageOptions opts;
+
+  ASSERT_EQ(0, librbd::copy_deep(src_ictx, src_ictx->md_ctx, dst_name.c_str(),
+                                 opts, no_op));
+
+  close_image(src_ictx);
+
+  librbd::ImageCtx *dst_ictx;
+  ASSERT_EQ(0, open_image(dst_name, &dst_ictx));
+
+  {
+    RWLock::RLocker snap_locker(dst_ictx->snap_lock);
+    ASSERT_EQ(CEPH_NOSNAP, dst_ictx->get_snap_id(
+                cls::rbd::UserSnapshotNamespace(), "copy"));
+  }
+
+  bufferptr read_ptr(bl.length());
+  bufferlist read_bl;
+  read_bl.push_back(read_ptr);
+  librbd::io::ReadResult read_result{&read_bl};
+
+  ASSERT_EQ((ssize_t)bl.length(), dst_ictx->io_work_queue->read(
+              0 * bl.length(), (ssize_t)bl.length(),
+              librbd::io::ReadResult{read_result}, 0));
+  ASSERT_TRUE(bl.contents_equal(read_bl));
+
+  ASSERT_EQ((ssize_t)bl.length(), dst_ictx->io_work_queue->read(
+              1 * bl.length(), (ssize_t)bl.length(),
+              librbd::io::ReadResult{read_result}, 0));
+  ASSERT_TRUE(bl.contents_equal(read_bl));
+
+  ASSERT_EQ((ssize_t)bl.length(), dst_ictx->io_work_queue->read(
+              2 * bl.length(), (ssize_t)bl.length(),
+              librbd::io::ReadResult{read_result}, 0));
+  ASSERT_TRUE(bl.contents_equal(read_bl));
+
+  ASSERT_EQ(0, librbd::snap_set(dst_ictx, cls::rbd::UserSnapshotNamespace(),
+                                "snap1"));
+
+  ASSERT_EQ((ssize_t)bl.length(), dst_ictx->io_work_queue->read(
+              0 * bl.length(), (ssize_t)bl.length(),
+              librbd::io::ReadResult{read_result}, 0));
+  ASSERT_TRUE(bl.contents_equal(read_bl));
+
+  ASSERT_EQ((ssize_t)bl.length(), dst_ictx->io_work_queue->read(
+              1 * bl.length(), (ssize_t)bl.length(),
+              librbd::io::ReadResult{read_result}, 0));
+  ASSERT_FALSE(bl.contents_equal(read_bl));
+
+  ASSERT_EQ((ssize_t)bl.length(), dst_ictx->io_work_queue->read(
+              2 * bl.length(), (ssize_t)bl.length(),
+              librbd::io::ReadResult{read_result}, 0));
+  ASSERT_TRUE(bl.contents_equal(read_bl));
+
+  close_image(dst_ictx);
+}
