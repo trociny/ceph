@@ -1287,6 +1287,28 @@ TEST_F(TestInternal, TestCopyDeep)
               1 * bl.length(), bl.length(), bufferlist{bl}, 0));
   ASSERT_EQ(0, librbd::flush(src_ictx));
 
+  ASSERT_EQ(0, snap_create(*src_ictx, "snap2"));
+  ASSERT_EQ((ssize_t)bl.length(), src_ictx->io_work_queue->write(
+              5 * bl.length(), bl.length(), bufferlist{bl}, 0));
+  ASSERT_EQ((ssize_t)bl.length(), src_ictx->io_work_queue->write(
+              7 * bl.length(), bl.length(), bufferlist{bl}, 0));
+  ASSERT_EQ(0, librbd::flush(src_ictx));
+
+  ASSERT_EQ(0, snap_create(*src_ictx, "snap3"));
+  bufferlist bl1;
+  bl1.append(std::string(1000, 'X'));
+  ASSERT_EQ((ssize_t)bl1.length(), src_ictx->io_work_queue->write(
+              5 * bl.length(), bl1.length(), bufferlist{bl}, 0));
+  ASSERT_EQ((ssize_t)bl1.length(), src_ictx->io_work_queue->write(
+              5 * bl.length() + 2000, bl1.length(), bufferlist{bl}, 0));
+  ASSERT_EQ(0, librbd::flush(src_ictx));
+
+  ASSERT_EQ(0, snap_create(*src_ictx, "snap4"));
+  ASSERT_EQ(static_cast<int>(bl.length() * 2),
+            src_ictx->io_work_queue->discard(5 * bl.length() + 10,
+                                             bl.length() * 2, false));
+  ASSERT_EQ(0, librbd::flush(src_ictx));
+
   ASSERT_EQ(0, snap_create(*src_ictx, "copy"));
 
   ASSERT_EQ(0, librbd::snap_set(src_ictx, cls::rbd::UserSnapshotNamespace(),

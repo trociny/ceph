@@ -219,9 +219,8 @@ void ObjectCopyRequest<I>::send_write_object() {
     return;
   }
 
-  ldout(m_cct, 20) << ""
-           << "dst_snap_seq=" << dst_snap_seq << ", "
-           << "dst_snaps=" << dst_snap_ids << dendl;
+  ldout(m_cct, 20) << "dst_snap_seq=" << dst_snap_seq << ", "
+                   << "dst_snaps=" << dst_snap_ids << dendl;
 
   auto &copy_ops = m_snap_copy_ops.begin()->second;
   assert(!copy_ops.empty());
