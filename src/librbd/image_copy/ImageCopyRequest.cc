@@ -52,14 +52,21 @@ void ImageCopyRequest<I>::cancel() {
 template <typename I>
 void ImageCopyRequest<I>::send_object_copies() {
   m_object_no = 0;
+  uint64_t end_src_object_no;
   {
     RWLock::RLocker snap_locker(m_src_image_ctx->snap_lock);
-    m_end_object_no =  m_src_image_ctx->get_object_count(CEPH_NOSNAP);
+    end_src_object_no =  m_src_image_ctx->get_object_count(CEPH_NOSNAP);
     for (auto snap_id : m_src_image_ctx->snaps) {
-      m_end_object_no = std::max(m_end_object_no,
-                                 m_src_image_ctx->get_object_count(snap_id));
+      end_src_object_no = std::max(end_src_object_no,
+                                   m_src_image_ctx->get_object_count(snap_id));
     }
   }
+
+  // Recalculate for destination
+  size_t src_object_size = 1 << m_src_image_ctx->order;
+  size_t dst_object_size = 1 << m_dst_image_ctx->order;
+  m_end_object_no = (end_src_object_no * src_object_size +
+                     (dst_object_size >> 1)) / dst_object_size;
 
   ldout(m_cct, 20) << "start_object=" << m_object_no << ", "
                    << "end_object=" << m_end_object_no << dendl;

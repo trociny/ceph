@@ -55,12 +55,16 @@ private:
    *    |
    *    v
    * LIST_SNAPS < * * *
-   *    |             * (-ENOENT and snap set stale)
+   *    | |      ^    * (-ENOENT and snap set stale)
+   *    | |      |    *
+   *    | \------/ (repeat for each src object)
+   *    |             *
    *    |   * * * * * *
-   *    |   *
    *    v   *
    * READ_OBJECT <--------\
-   *    |                 | (repeat for each snapshot)
+   *    | |      ^        | (repeat for each snapshot)
+   *    | |      |        |
+   *    | \------/ (repeat for each src object)
    *    v                 |
    * WRITE_OBJECT --------/
    *    |
@@ -77,6 +81,7 @@ private:
 
   enum CopyOpType {
     COPY_OP_TYPE_WRITE,
+    COPY_OP_TYPE_ZERO,
     COPY_OP_TYPE_TRUNC,
     COPY_OP_TYPE_REMOVE
   };
@@ -96,17 +101,19 @@ private:
     bufferlist out_bl;
   };
 
-  typedef std::list<CopyOp> CopyOps;
+  typedef std::map<uint64_t, std::pair<uint64_t, size_t>> ObjectOffsets; // src_object_id -> (object_off, len)
+  typedef std::list<CopyOp> ObjectCopyOps;
   typedef std::pair<librados::snap_t, librados::snap_t> WriteReadSnapIds;
+  typedef std::map<uint64_t, ObjectCopyOps> CopyOps;  // src_object_id -> object_copy_ops
   typedef std::map<WriteReadSnapIds, CopyOps> SnapCopyOps;
   typedef std::map<librados::snap_t, uint8_t> SnapObjectStates;
-  typedef std::map<librados::snap_t, uint64_t> SnapObjectSizes;
+  typedef std::map<librados::snap_t, std::map<uint64_t, uint64_t>> SnapObjectSizes;
 
   ImageCtxT *m_src_image_ctx;
   ImageCtxT *m_dst_image_ctx;
   CephContext *m_cct;
   const SnapMap &m_snap_map;
-  uint64_t m_object_number;
+  uint64_t m_dst_object_number;
   Context *m_on_finish;
 
   decltype(m_src_image_ctx->data_ctx) m_src_io_ctx;
@@ -114,6 +121,7 @@ private:
   std::string m_src_oid;
   std::string m_dst_oid;
 
+  ObjectOffsets m_src_object_offsets;
   librados::snap_set_t m_snap_set;
   int m_snap_ret;
 
@@ -123,6 +131,8 @@ private:
   SnapCopyOps m_snap_copy_ops;
   SnapObjectStates m_snap_object_states;
   SnapObjectSizes m_snap_object_sizes;
+
+  std::map<uint64_t, librados::ObjectReadOperation> m_read_ops;
 
   void send_list_snaps();
   void handle_list_snaps(int r);
@@ -138,9 +148,19 @@ private:
 
   Context *start_dst_op(RWLock &owner_lock);
 
+  void init_offsets();
   void compute_diffs();
   void finish(int r);
 
+  inline uint64_t src_to_dst_object_offset(uint64_t src_object_number,
+                                           uint64_t src_object_offset) {
+    return ((1 << m_src_image_ctx->order) * src_object_number +
+            src_object_offset) % (1 << m_dst_image_ctx->order);
+  }
+  inline uint64_t dst_to_src_object_offset(uint64_t dst_object_offset) {
+    return ((1 << m_dst_image_ctx->order) * m_dst_object_number +
+            dst_object_offset) % (1 << m_src_image_ctx->order);
+  }
 };
 
 } // namespace image_copy
