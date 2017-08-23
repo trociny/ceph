@@ -56,6 +56,14 @@ std::string TestFixture::get_temp_image_name() {
 }
 
 void TestFixture::SetUp() {
+  static bool seeded = false;
+  if (!seeded) {
+    seeded = true;
+    int seed = getpid();
+    cout << "seed " << seed << std::endl;
+    srand(seed);
+  }
+
   ASSERT_EQ(0, _rados.ioctx_create(_pool_name.c_str(), m_ioctx));
 
   m_image_name = get_temp_image_name();
