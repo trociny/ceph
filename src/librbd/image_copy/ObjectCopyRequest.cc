@@ -578,7 +578,7 @@ void ObjectCopyRequest<I>::compute_diffs() {
       }
       if (end_size < prev_end_size) {
         if (allow_trunc) {
-          // XXXMG: if end_size == src_object_off then remove
+          // XXXMG: if end_size is 0 it may be remove?
           ldout(m_cct, 20) << "trunc op: " << end_size << dendl;
           m_snap_copy_ops[{end_src_snap_id, clone_end_snap_id}][src_object_number]
             .emplace_back(COPY_OP_TYPE_TRUNC, end_size, 0U);
@@ -592,7 +592,7 @@ void ObjectCopyRequest<I>::compute_diffs() {
       m_snap_object_sizes[end_src_snap_id][src_object_number] = end_size;
     } else {
       if (prev_exists) {
-        if (false && first_src_object && allow_trunc) {
+        if (first_src_object && allow_trunc) {
           // object remove
           ldout(m_cct, 20) << "remove op" << dendl;
           m_snap_copy_ops[{end_src_snap_id, end_src_snap_id}][src_object_number]
