@@ -5,14 +5,12 @@
 #include "InstanceWatcher.h"
 #include "ProgressContext.h"
 #include "common/errno.h"
-#include "journal/Journaler.h"
-#include "librbd/ExclusiveLock.h"
+#include "librbd/DeepCopyRequest.h"
 #include "librbd/ImageCtx.h"
-#include "librbd/ObjectMap.h"
+#include "librbd/ImageState.h"
 #include "librbd/Utils.h"
+#include "librbd/internal.h"
 #include "librbd/journal/Types.h"
-#include "tools/rbd_mirror/image_sync/ImageCopyRequest.h"
-#include "tools/rbd_mirror/image_sync/SnapshotCopyRequest.h"
 #include "tools/rbd_mirror/image_sync/SyncPointCreateRequest.h"
 #include "tools/rbd_mirror/image_sync/SyncPointPruneRequest.h"
 
@@ -30,8 +28,22 @@ using librbd::util::create_context_callback;
 using librbd::util::unique_lock_name;
 
 template <typename I>
+class ImageSync<I>::ImageCopyProgressContext : public librbd::ProgressContext {
+public:
+  ImageCopyProgressContext(ImageSync *image_sync) : image_sync(image_sync) {
+  }
+
+  int update_progress(uint64_t offset, uint64_t size) override {
+    int percent = 100 * offset / size;
+    image_sync->update_progress("COPY_IMAGE " + stringify(percent) + "%");
+    return 0;
+  }
+
+  ImageSync *image_sync;
+};
+
+template <typename I>
 ImageSync<I>::ImageSync(I *local_image_ctx, I *remote_image_ctx,
-                        SafeTimer *timer, Mutex *timer_lock,
                         const std::string &mirror_uuid, Journaler *journaler,
                         MirrorPeerClientMeta *client_meta,
                         ContextWQ *work_queue,
@@ -39,17 +51,16 @@ ImageSync<I>::ImageSync(I *local_image_ctx, I *remote_image_ctx,
                         Context *on_finish, ProgressContext *progress_ctx)
   : BaseRequest("rbd::mirror::ImageSync", local_image_ctx->cct, on_finish),
     m_local_image_ctx(local_image_ctx), m_remote_image_ctx(remote_image_ctx),
-    m_timer(timer), m_timer_lock(timer_lock), m_mirror_uuid(mirror_uuid),
-    m_journaler(journaler), m_client_meta(client_meta),
-    m_work_queue(work_queue), m_instance_watcher(instance_watcher),
-    m_progress_ctx(progress_ctx),
+    m_mirror_uuid(mirror_uuid), m_journaler(journaler),
+    m_client_meta(client_meta), m_work_queue(work_queue),
+    m_instance_watcher(instance_watcher), m_progress_ctx(progress_ctx),
     m_lock(unique_lock_name("ImageSync::m_lock", this)) {
 }
 
 template <typename I>
 ImageSync<I>::~ImageSync() {
-  assert(m_snapshot_copy_request == nullptr);
   assert(m_image_copy_request == nullptr);
+  assert(m_image_copy_prog_ctx == nullptr);
 }
 
 template <typename I>
@@ -67,10 +78,6 @@ void ImageSync<I>::cancel() {
 
   if (m_instance_watcher->cancel_sync_request(m_local_image_ctx->id)) {
     return;
-  }
-
-  if (m_snapshot_copy_request != nullptr) {
-    m_snapshot_copy_request->cancel();
   }
 
   if (m_image_copy_request != nullptr) {
@@ -143,7 +150,7 @@ void ImageSync<I>::send_create_sync_point() {
   // TODO: when support for disconnecting laggy clients is added,
   //       re-connect and create catch-up sync point
   if (m_client_meta->sync_points.size() > 0) {
-    send_copy_snapshots();
+    send_set_sync_point_snap_context();
     return;
   }
 
@@ -167,52 +174,39 @@ void ImageSync<I>::handle_create_sync_point(int r) {
     return;
   }
 
-  send_copy_snapshots();
+  send_set_sync_point_snap_context();
 }
 
 template <typename I>
-void ImageSync<I>::send_copy_snapshots() {
+void ImageSync<I>::send_set_sync_point_snap_context() {
   m_lock.Lock();
   if (m_canceled) {
     m_lock.Unlock();
     finish(-ECANCELED);
     return;
   }
+  m_lock.Unlock();
 
   dout(20) << dendl;
 
+  assert(!m_client_meta->sync_points.empty());
+  auto &sync_point = m_client_meta->sync_points.front();
   Context *ctx = create_context_callback<
-    ImageSync<I>, &ImageSync<I>::handle_copy_snapshots>(this);
-  m_snapshot_copy_request = SnapshotCopyRequest<I>::create(
-    m_local_image_ctx, m_remote_image_ctx, &m_snap_map, m_journaler,
-    m_client_meta, m_work_queue, ctx);
-  m_snapshot_copy_request->get();
-  m_lock.Unlock();
+    ImageSync<I>, &ImageSync<I>::handle_set_sync_point_snap_context>(this);
 
-  update_progress("COPY_SNAPSHOTS");
+  update_progress("SET_SYNC_POINT_SNAP_CONTEXT");
 
-  m_snapshot_copy_request->send();
+  m_remote_image_ctx->state->snap_set(cls::rbd::UserSnapshotNamespace(),
+                                      sync_point.snap_name.c_str(), ctx);
 }
 
 template <typename I>
-void ImageSync<I>::handle_copy_snapshots(int r) {
+void ImageSync<I>::handle_set_sync_point_snap_context(int r) {
   dout(20) << ": r=" << r << dendl;
 
-  {
-    Mutex::Locker locker(m_lock);
-    m_snapshot_copy_request->put();
-    m_snapshot_copy_request = nullptr;
-    if (r == 0 && m_canceled) {
-      r = -ECANCELED;
-    }
-  }
-
-  if (r == -ECANCELED) {
-    dout(10) << ": snapshot copy canceled" << dendl;
-    finish(r);
-    return;
-  } else if (r < 0) {
-    derr << ": failed to copy snapshot metadata: " << cpp_strerror(r) << dendl;
+  if (r < 0) {
+    derr << ": failed to set snap context: " << cpp_strerror(r)
+         << dendl;
     finish(r);
     return;
   }
@@ -233,10 +227,10 @@ void ImageSync<I>::send_copy_image() {
 
   Context *ctx = create_context_callback<
     ImageSync<I>, &ImageSync<I>::handle_copy_image>(this);
-  m_image_copy_request = ImageCopyRequest<I>::create(
-    m_local_image_ctx, m_remote_image_ctx, m_timer, m_timer_lock,
-    m_journaler, m_client_meta, &m_client_meta->sync_points.front(),
-    ctx, m_progress_ctx);
+  m_image_copy_prog_ctx = new ImageCopyProgressContext(this);
+  m_image_copy_request = librbd::DeepCopyRequest<I>::create(
+    m_remote_image_ctx, m_local_image_ctx, m_work_queue,
+    m_image_copy_prog_ctx, ctx);
   m_image_copy_request->get();
   m_lock.Unlock();
 
@@ -253,6 +247,8 @@ void ImageSync<I>::handle_copy_image(int r) {
     Mutex::Locker locker(m_lock);
     m_image_copy_request->put();
     m_image_copy_request = nullptr;
+    delete m_image_copy_prog_ctx;
+    m_image_copy_prog_ctx = nullptr;
     if (r == 0 && m_canceled) {
       r = -ECANCELED;
     }
@@ -268,89 +264,40 @@ void ImageSync<I>::handle_copy_image(int r) {
     return;
   }
 
-  send_copy_object_map();
+  send_unset_sync_point_snap_context();
 }
 
 template <typename I>
-void ImageSync<I>::send_copy_object_map() {
-  update_progress("COPY_OBJECT_MAP");
-
-  m_local_image_ctx->owner_lock.get_read();
-  m_local_image_ctx->snap_lock.get_read();
-  if (!m_local_image_ctx->test_features(RBD_FEATURE_OBJECT_MAP,
-                                        m_local_image_ctx->snap_lock)) {
-    m_local_image_ctx->snap_lock.put_read();
-    m_local_image_ctx->owner_lock.put_read();
-    send_prune_sync_points();
+void ImageSync<I>::send_unset_sync_point_snap_context() {
+  m_lock.Lock();
+  if (m_canceled) {
+    m_lock.Unlock();
+    finish(-ECANCELED);
     return;
   }
+  m_lock.Unlock();
 
-  assert(m_local_image_ctx->object_map != nullptr);
-
-  assert(!m_client_meta->sync_points.empty());
-  librbd::journal::MirrorPeerSyncPoint &sync_point =
-    m_client_meta->sync_points.front();
-  auto snap_id_it = m_local_image_ctx->snap_ids.find(
-    {cls::rbd::UserSnapshotNamespace(), sync_point.snap_name});
-  assert(snap_id_it != m_local_image_ctx->snap_ids.end());
-  librados::snap_t snap_id = snap_id_it->second;
-
-  dout(20) << ": snap_id=" << snap_id << ", "
-           << "snap_name=" << sync_point.snap_name << dendl;
-
-  Context *finish_op_ctx = nullptr;
-  if (m_local_image_ctx->exclusive_lock != nullptr) {
-    finish_op_ctx = m_local_image_ctx->exclusive_lock->start_op();
-  }
-  if (finish_op_ctx == nullptr) {
-    derr << ": lost exclusive lock" << dendl;
-    m_local_image_ctx->snap_lock.put_read();
-    m_local_image_ctx->owner_lock.put_read();
-    finish(-EROFS);
-    return;
-  }
-
-  // rollback the object map (copy snapshot object map to HEAD)
-  RWLock::WLocker object_map_locker(m_local_image_ctx->object_map_lock);
-  auto ctx = new FunctionContext([this, finish_op_ctx](int r) {
-      handle_copy_object_map(r);
-      finish_op_ctx->complete(0);
-    });
-  m_local_image_ctx->object_map->rollback(snap_id, ctx);
-  m_local_image_ctx->snap_lock.put_read();
-  m_local_image_ctx->owner_lock.put_read();
-}
-
-template <typename I>
-void ImageSync<I>::handle_copy_object_map(int r) {
   dout(20) << dendl;
-
-  assert(r == 0);
-  send_refresh_object_map();
-}
-
-template <typename I>
-void ImageSync<I>::send_refresh_object_map() {
-  dout(20) << dendl;
-
-  update_progress("REFRESH_OBJECT_MAP");
 
   Context *ctx = create_context_callback<
-    ImageSync<I>, &ImageSync<I>::handle_refresh_object_map>(this);
-  m_object_map = m_local_image_ctx->create_object_map(CEPH_NOSNAP);
-  m_object_map->open(ctx);
+    ImageSync<I>, &ImageSync<I>::handle_unset_sync_point_snap_context>(this);
+
+  update_progress("UNSET_SYNC_POINT_SNAP_CONTEXT");
+
+  m_remote_image_ctx->state->snap_set(cls::rbd::UserSnapshotNamespace(), "",
+                                      ctx);
 }
 
 template <typename I>
-void ImageSync<I>::handle_refresh_object_map(int r) {
-  dout(20) << dendl;
+void ImageSync<I>::handle_unset_sync_point_snap_context(int r) {
+  dout(20) << ": r=" << r << dendl;
 
-  assert(r == 0);
-  {
-    RWLock::WLocker snap_locker(m_local_image_ctx->snap_lock);
-    std::swap(m_local_image_ctx->object_map, m_object_map);
+  if (r < 0) {
+    derr << ": failed to set snap context: " << cpp_strerror(r)
+         << dendl;
+    finish(r);
+    return;
   }
-  delete m_object_map;
 
   send_prune_sync_points();
 }

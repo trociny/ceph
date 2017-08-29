@@ -674,9 +674,9 @@ void BootstrapRequest<I>::image_sync() {
       Context *ctx = create_context_callback<
         BootstrapRequest<I>, &BootstrapRequest<I>::handle_image_sync>(this);
       m_image_sync = ImageSync<I>::create(
-          *m_local_image_ctx, m_remote_image_ctx, m_timer, m_timer_lock,
-          m_local_mirror_uuid, m_journaler, m_client_meta, m_work_queue,
-          m_instance_watcher, ctx, m_progress_ctx);
+          *m_local_image_ctx, m_remote_image_ctx, m_local_mirror_uuid,
+          m_journaler, m_client_meta, m_work_queue, m_instance_watcher,
+          ctx, m_progress_ctx);
 
       m_image_sync->get();
 
