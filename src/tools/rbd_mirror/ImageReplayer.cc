@@ -214,7 +214,7 @@ public:
   }
 
   ~ImageReplayerAdminSocketHook() override {
-    Mutex::Locker locker(lock);
+    //Mutex::Locker locker(lock); XXXMG
     for (Commands::const_iterator i = commands.begin(); i != commands.end();
 	 ++i) {
       (void)admin_socket->unregister_command(i->first);
@@ -225,7 +225,7 @@ public:
 
   bool call(std::string command, cmdmap_t& cmdmap, std::string format,
 	    bufferlist& out) override {
-    Mutex::Locker locker(lock);
+    //Mutex::Locker locker(lock); XXXMG
     Commands::const_iterator i = commands.find(command);
     assert(i != commands.end());
     Formatter *f = Formatter::create(format);

@@ -98,7 +98,6 @@ public:
 
   ImageSync<> *create_request(Context *ctx) {
     return new ImageSync<>(m_local_image_ctx, m_remote_image_ctx,
-                           m_threads->timer, &m_threads->timer_lock,
                            "mirror-uuid", m_remote_journaler, &m_client_meta,
                            m_threads->work_queue, m_instance_watcher, ctx);
   }
@@ -120,7 +119,7 @@ TEST_F(TestImageSync, Empty) {
   ASSERT_EQ(0, m_remote_image_ctx->state->refresh());
   ASSERT_EQ(0U, m_remote_image_ctx->snap_ids.size());
   ASSERT_EQ(0, m_local_image_ctx->state->refresh());
-  ASSERT_EQ(1U, m_local_image_ctx->snap_ids.size()); // deleted on journal replay
+  ASSERT_EQ(0U, m_local_image_ctx->snap_ids.size());
 }
 
 TEST_F(TestImageSync, Simple) {
