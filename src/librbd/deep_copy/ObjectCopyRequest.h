@@ -140,7 +140,7 @@ private:
   std::string m_src_oid;
   SrcObjectExtents m_src_object_extents;
   librados::snap_set_t m_snap_set;
-  int m_snap_ret;
+  int m_snap_ret = 0;
   bool m_retry_missing_read = false;
   librados::snap_set_t m_retry_snap_set;
 
