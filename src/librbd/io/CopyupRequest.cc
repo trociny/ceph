@@ -12,6 +12,8 @@
 #include "librbd/ImageCtx.h"
 #include "librbd/ObjectMap.h"
 #include "librbd/Utils.h"
+#include "librbd/deep_copy/ObjectCopyRequest.h"
+#include "librbd/deep_copy/Utils.h"
 #include "librbd/io/AioCompletion.h"
 #include "librbd/io/ImageRequest.h"
 #include "librbd/io/ObjectRequest.h"
@@ -119,7 +121,7 @@ template <typename I>
 bool CopyupRequest<I>::send_copyup() {
   bool add_copyup_op = !m_copyup_data.is_zero();
   bool copy_on_read = m_pending_requests.empty();
-  if (!add_copyup_op && copy_on_read) {
+  if (!add_copyup_op && copy_on_read && !is_deep_copy()) {
     // copyup empty object to prevent future CoR attempts
     m_copyup_data.clear();
     add_copyup_op = true;
@@ -207,9 +209,29 @@ bool CopyupRequest<I>::is_copyup_required() {
 }
 
 template <typename I>
+bool CopyupRequest<I>::is_deep_copy() const {
+  return m_ictx->parent_md.spec.migrate_source;
+}
+
+template <typename I>
 void CopyupRequest<I>::send()
 {
   m_state = STATE_READ_FROM_PARENT;
+
+  if (is_deep_copy()) {
+    deep_copy::util::compute_snap_map(0, CEPH_NOSNAP,
+                                      m_ictx->parent_md.spec.snap_seqs,
+                                      &m_snap_map);
+    auto req = deep_copy::ObjectCopyRequest<I>::create(
+        m_ictx->parent, m_ictx, m_snap_map, m_object_no,
+        util::create_context_callback(this));
+    ldout(m_ictx->cct, 20) << "deep copy object req " << req
+                           << ", object_no " << m_object_no
+                           << dendl;
+    req->send();
+    return;
+  }
+
   AioCompletion *comp = AioCompletion::create_and_start(
     this, m_ictx, AIO_TYPE_READ);
 

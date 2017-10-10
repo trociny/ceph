@@ -65,6 +65,7 @@ struct ParentSpec {
   std::string image_id;
   snapid_t snap_id;
   bool migrate_source = false;
+  SnapSeqs snap_seqs;
 
   ParentSpec() : pool_id(-1), snap_id(CEPH_NOSNAP) {
   }
