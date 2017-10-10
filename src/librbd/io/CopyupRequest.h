@@ -8,6 +8,7 @@
 #include "include/rados/librados.hpp"
 #include "include/buffer.h"
 #include "common/zipkin_trace.h"
+#include "librbd/deep_copy/Types.h"
 #include "librbd/io/AsyncOperation.h"
 #include "librbd/io/Types.h"
 
@@ -91,6 +92,7 @@ private:
   ZTracer::Trace m_trace;
 
   State m_state;
+  deep_copy::SnapMap m_snap_map;
   ceph::bufferlist m_copyup_data;
   std::vector<ObjectRequest<ImageCtxT> *> m_pending_requests;
   std::atomic<unsigned> m_pending_copyups { 0 };
@@ -110,6 +112,7 @@ private:
   bool send_object_map();
   bool send_copyup();
   bool is_copyup_required();
+  bool is_deep_copy() const;
 };
 
 } // namespace io
