@@ -6,9 +6,12 @@
 
 #include "include/types.h"
 #include "cls/rbd/cls_rbd_types.h"
+#include <map>
 #include <string>
 
 namespace librbd {
+
+typedef std::map<uint64_t, uint64_t> SnapSeqs;
 
 /** @brief Unique identification of a parent in clone relationship.
  * Cloning an image creates a child image that keeps a reference
