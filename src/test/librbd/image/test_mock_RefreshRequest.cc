@@ -104,6 +104,17 @@ public:
                                                                 enabled));
   }
 
+  void expect_get_migrate_header(MockRefreshImageCtx &mock_image_ctx, int r) {
+    auto &expect = EXPECT_CALL(get_mock_io_ctx(mock_image_ctx.md_ctx),
+                               exec(mock_image_ctx.header_oid, _, StrEq("rbd"),
+                                    StrEq("migrate_get"), _, _, _));
+    if (r < 0) {
+      expect.WillOnce(Return(r));
+    } else {
+      expect.WillOnce(DoDefault());
+    }
+  }
+
   void expect_v1_read_header(MockRefreshImageCtx &mock_image_ctx, int r) {
     auto &expect = EXPECT_CALL(get_mock_io_ctx(mock_image_ctx.md_ctx),
                                read(mock_image_ctx.header_oid, _, _, _));
@@ -366,6 +377,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessV1) {
   expect_test_features(mock_image_ctx);
 
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_v1_read_header(mock_image_ctx, 0);
   expect_v1_get_snapshots(mock_image_ctx, 0);
   expect_v1_get_locks(mock_image_ctx, 0);
@@ -390,6 +402,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessSnapshotV1) {
   expect_test_features(mock_image_ctx);
 
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_v1_read_header(mock_image_ctx, 0);
   expect_v1_get_snapshots(mock_image_ctx, 0);
   expect_v1_get_locks(mock_image_ctx, 0);
@@ -416,6 +429,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessV2) {
   expect_test_features(mock_image_ctx);
 
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -447,6 +461,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessSnapshotV2) {
   expect_test_features(mock_image_ctx);
 
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -484,6 +499,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessSetSnapshotV2) {
   expect_test_features(mock_image_ctx);
 
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -540,6 +556,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessChild) {
   expect_test_features(mock_image_ctx);
 
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -592,6 +609,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessChildDontOpenParent) {
   expect_test_features(mock_image_ctx);
 
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -656,6 +674,7 @@ TEST_F(TestMockImageRefreshRequest, DisableExclusiveLock) {
   // verify that exclusive lock is properly handled when object map
   // and journaling were never enabled (or active)
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -709,6 +728,7 @@ TEST_F(TestMockImageRefreshRequest, DisableExclusiveLockWhileAcquiringLock) {
   // verify that exclusive lock is properly handled when object map
   // and journaling were never enabled (or active)
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -752,6 +772,7 @@ TEST_F(TestMockImageRefreshRequest, JournalDisabledByPolicy) {
   expect_is_exclusive_lock_owner(mock_exclusive_lock, true);
 
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -800,6 +821,7 @@ TEST_F(TestMockImageRefreshRequest, EnableJournalWithExclusiveLock) {
 
   // journal should be immediately opened if exclusive lock owned
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -847,6 +869,7 @@ TEST_F(TestMockImageRefreshRequest, EnableJournalWithoutExclusiveLock) {
 
   // do not open the journal if exclusive lock is not owned
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -892,6 +915,7 @@ TEST_F(TestMockImageRefreshRequest, DisableJournal) {
 
   // verify journal is closed if feature disabled
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -937,6 +961,7 @@ TEST_F(TestMockImageRefreshRequest, EnableObjectMapWithExclusiveLock) {
 
   // object map should be immediately opened if exclusive lock owned
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -975,6 +1000,7 @@ TEST_F(TestMockImageRefreshRequest, EnableObjectMapWithoutExclusiveLock) {
 
   // do not open the object map if exclusive lock is not owned
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -1024,6 +1050,7 @@ TEST_F(TestMockImageRefreshRequest, DisableObjectMap) {
 
   // verify object map is closed if feature disabled
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);
@@ -1064,6 +1091,7 @@ TEST_F(TestMockImageRefreshRequest, OpenObjectMapError) {
 
   // object map should be immediately opened if exclusive lock owned
   InSequence seq;
+  expect_get_migrate_header(mock_image_ctx, -ENOENT);
   expect_get_mutable_metadata(mock_image_ctx, 0);
   expect_get_metadata(mock_image_ctx, 0);
   expect_apply_metadata(mock_image_ctx, 0);

@@ -45,6 +45,9 @@ private:
    *
    * <start>
    *    |
+   * GET_MIGRATE_HEADER
+   *    |
+   *    v
    *    | (v1)
    *    |-----> V1_READ_HEADER ---> V1_GET_SNAPSHOTS ---> V1_GET_LOCKS
    *    |                                                     |
@@ -116,6 +119,7 @@ private:
   bool m_skip_open_parent_image;
   Context *m_on_finish;
 
+  cls::rbd::MigrateSpec m_migrate_spec;
   int m_error_result;
   bool m_flush_aio;
   decltype(m_image_ctx.exclusive_lock) m_exclusive_lock;
@@ -154,6 +158,9 @@ private:
 
   bool m_blocked_writes = false;
   bool m_incomplete_update = false;
+
+  void send_get_migrate_header();
+  Context *handle_get_migrate_header(int *result);
 
   void send_v1_read_header();
   Context *handle_v1_read_header(int *result);
@@ -231,6 +238,7 @@ private:
 
   void apply();
   int get_parent_info(uint64_t snap_id, ParentInfo *parent_md);
+  bool get_migrate_info(ParentInfo *parent_md);
 };
 
 } // namespace image

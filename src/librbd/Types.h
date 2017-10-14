@@ -18,8 +18,10 @@ typedef std::map<uint64_t, uint64_t> SnapSeqs;
  * to its parent. This allows copy-on-write images. */
 struct ParentSpec {
   int64_t pool_id;
+  std::string image_name;
   std::string image_id;
   snapid_t snap_id;
+  bool migrate_source = false;
 
   ParentSpec() : pool_id(-1), snap_id(CEPH_NOSNAP) {
   }
@@ -29,6 +31,7 @@ struct ParentSpec {
 
   bool operator==(const ParentSpec &other) {
     return ((this->pool_id == other.pool_id) &&
+            (this->image_name == other.image_name) &&
             (this->image_id == other.image_id) &&
             (this->snap_id == other.snap_id));
   }

@@ -58,11 +58,68 @@ RefreshRequest<I>::~RefreshRequest() {
 
 template <typename I>
 void RefreshRequest<I>::send() {
+  send_get_migrate_header();
+}
+
+template <typename I>
+void RefreshRequest<I>::send_get_migrate_header() {
+  CephContext *cct = m_image_ctx.cct;
+  ldout(cct, 10) << this << " " << __func__ << dendl;
+
+  librados::ObjectReadOperation op;
+  cls_client::migrate_get_start(&op);
+
+  using klass = RefreshRequest<I>;
+  librados::AioCompletion *comp =
+    create_rados_callback<klass, &klass::handle_get_migrate_header>(this);
+  m_out_bl.clear();
+  m_image_ctx.md_ctx.aio_operate(m_image_ctx.header_oid, comp, &op,
+                                 &m_out_bl);
+  comp->release();
+}
+
+template <typename I>
+Context *RefreshRequest<I>::handle_get_migrate_header(int *result) {
+  CephContext *cct = m_image_ctx.cct;
+  ldout(cct, 10) << this << " " << __func__ << ": r=" << *result << dendl;
+
+  if (*result == 0) {
+    bufferlist::iterator it = m_out_bl.begin();
+    *result = cls_client::migrate_get_finish(&it, &m_migrate_spec);
+    if (*result == 0) {
+      if (m_migrate_spec.type == cls::rbd::MIGRATE_TYPE_SRC) {
+        if (!m_image_ctx.read_only) {
+          lderr(cct) << "image being migrated" << dendl;
+          *result = -EROFS;
+          return m_on_finish;
+        }
+        ldout(cct, 1) << this << " " << __func__ << ": migrate header detected"
+                      << ", migrating to: " << m_migrate_spec << dendl;
+      } else if (m_migrate_spec.type == cls::rbd::MIGRATE_TYPE_DST) {
+        ldout(cct, 1) << this << " " << __func__ << ": migrate header detected"
+                      << ", migrating from: " << m_migrate_spec << dendl;
+      } else {
+        *result = -EBADMSG;
+      }
+    }
+  }
+
+  if (*result == -ENOENT) {
+    *result = 0;
+  }
+
+  if (*result < 0) {
+    lderr(cct) << "failed to retrieve migrate header: " << cpp_strerror(*result)
+               << dendl;
+    return m_on_finish;
+  }
+
   if (m_image_ctx.old_format) {
     send_v1_read_header();
   } else {
     send_v2_get_mutable_metadata();
   }
+  return nullptr;
 }
 
 template <typename I>
@@ -1085,7 +1142,9 @@ void RefreshRequest<I>::apply() {
       m_image_ctx.features = m_features;
       m_image_ctx.flags = m_flags;
       m_image_ctx.group_spec = m_group_spec;
-      m_image_ctx.parent_md = m_parent_md;
+      if (!get_migrate_info(&m_image_ctx.parent_md)) {
+        m_image_ctx.parent_md = m_parent_md;
+      }
     }
 
     for (size_t i = 0; i < m_snapc.snaps.size(); ++i) {
@@ -1169,7 +1228,9 @@ void RefreshRequest<I>::apply() {
 template <typename I>
 int RefreshRequest<I>::get_parent_info(uint64_t snap_id,
                                        ParentInfo *parent_md) {
-  if (snap_id == CEPH_NOSNAP) {
+  if (get_migrate_info(parent_md)) {
+    return 0;
+  } else if (snap_id == CEPH_NOSNAP) {
     *parent_md = m_parent_md;
     return 0;
   } else {
@@ -1181,6 +1242,23 @@ int RefreshRequest<I>::get_parent_info(uint64_t snap_id,
     }
   }
   return -ENOENT;
+}
+
+template <typename I>
+bool RefreshRequest<I>::get_migrate_info(ParentInfo *parent_md) {
+  if (m_migrate_spec.type != cls::rbd::MIGRATE_TYPE_DST) {
+    return false;
+  }
+
+  parent_md->spec.pool_id = m_migrate_spec.pool_id;
+  parent_md->spec.image_name = m_migrate_spec.image_name;
+  parent_md->spec.image_id = m_migrate_spec.image_id;
+  parent_md->spec.snap_id = CEPH_NOSNAP;
+  parent_md->spec.migrate_source = true;
+  parent_md->spec.snap_seqs = m_migrate_spec.snap_seqs;
+  parent_md->overlap = m_size;
+
+  return true;
 }
 
 } // namespace image
