@@ -453,6 +453,45 @@ test_trash() {
     remove_images
 }
 
+test_migrate() {
+    echo "testing migrate..."
+    remove_images
+    rados mkpool rbd2
+
+    # Convert to new format
+    rbd create --image-format 1 -s 128M test1
+    rbd info test1 | grep 'format: 1'
+    rbd migrate test1 --image-format 2
+    rbd info test1 | grep 'format: 2'
+
+    # Enable layering (and some other features)
+    rbd info test1 | grep 'features: .*layering' && exit 1 || true
+    rbd migrate test1 --image-feature \
+        layering,exclusive-lock,object-map,fast-diff,deep-flatten
+    rbd info test1 | grep 'features: .*layering'
+    ID=`rbd trash ls | awk '$2 == "test1" {print $1}'`
+    test -n "${ID}"
+    rbd trash rm "${ID}"
+
+    # Migrate to other pool
+    rbd migrate test1 rbd2/test1
+    rbd ls | wc -l | grep '^0$'
+    rbd -p rbd2 ls | grep test1
+    ID=`rbd trash ls | awk '$2 == "test1" {print $1}'`
+    test -n "${ID}"
+    rbd trash rm "${ID}"
+
+    # Enable data pool
+    rbd create -s 128M test1
+    rbd migrate test1 --data-pool rbd2
+    rbd info test1 | grep 'data_pool: rbd2'
+    ID=`rbd trash ls | awk '$2 == "test1" {print $1}'`
+    test -n "${ID}"
+    rbd trash rm "${ID}"
+
+    remove_images
+    rados rmpool rbd2 rbd2 --yes-i-really-really-mean-it
+}
 
 test_pool_image_args
 test_rename
@@ -461,6 +500,7 @@ test_remove
 RBD_CREATE_ARGS=""
 test_others
 test_locking
+test_migrate
 RBD_CREATE_ARGS="--image-format 2"
 test_others
 test_locking
