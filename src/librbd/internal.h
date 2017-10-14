@@ -213,4 +213,6 @@ namespace librbd {
 
 }
 
+std::ostream &operator<<(std::ostream &os, const librbd::ImageOptions &opts);
+
 #endif
