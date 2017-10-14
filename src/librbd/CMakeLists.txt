@@ -25,6 +25,7 @@ set(librbd_internal_srcs
   api/DiffIterate.cc
   api/Group.cc
   api/Image.cc
+  api/Migrate.cc
   api/Mirror.cc
   cache/ImageWriteback.cc
   cache/PassthroughImageCache.cc

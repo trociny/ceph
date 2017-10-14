@@ -134,6 +134,10 @@ bool FlattenRequest<I>::send_update_header() {
       ldout(cct, 5) << "image already flattened" << dendl;
       return true;
     }
+    if (image_ctx.parent_md.spec.migrate_source) {
+      ldout(cct, 20) << "migration -- no need to update header" << dendl;
+      return true;
+    }
     m_parent_spec = image_ctx.parent_md.spec;
   }
   m_ignore_enoent = true;

@@ -298,6 +298,11 @@ public:
   int deep_copy_with_progress(IoCtx& dest_io_ctx, const char *destname,
                               ImageOptions& opts, ProgressContext &prog_ctx);
 
+  /* migrate */
+  int migrate(IoCtx& dest_io_ctx, const char *destname, ImageOptions& opts);
+  int migrate_with_progress(IoCtx& dest_io_ctx, const char *destname,
+                            ImageOptions& opts, ProgressContext &prog_ctx);
+
   /* striping */
   uint64_t get_stripe_unit() const;
   uint64_t get_stripe_count() const;

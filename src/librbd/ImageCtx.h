@@ -228,6 +228,7 @@ namespace librbd {
     ImageCtx(const std::string &image_name, const std::string &image_id,
 	     const char *snap, IoCtx& p, bool read_only);
     ~ImageCtx();
+    void clear_nonreusable();
     void init();
     void init_cache();
     void shutdown();

@@ -225,38 +225,47 @@ struct C_InvalidateCache : public Context {
   }
 
   ImageCtx::~ImageCtx() {
-    assert(image_watcher == NULL);
-    assert(exclusive_lock == NULL);
-    assert(object_map == NULL);
-    assert(journal == NULL);
-    assert(asok_hook == NULL);
+    clear_nonreusable();
+
+    delete journal_policy;
+    delete exclusive_lock_policy;
+    delete operations;
+  }
+
+  void ImageCtx::clear_nonreusable() {
+    assert(image_watcher == nullptr);
+    assert(exclusive_lock == nullptr);
+    assert(object_map == nullptr);
+    assert(journal == nullptr);
+    assert(asok_hook == nullptr);
 
     if (perfcounter) {
       perf_stop();
     }
     if (object_cacher) {
       delete object_cacher;
-      object_cacher = NULL;
+      object_cacher = nullptr;
     }
     if (writeback_handler) {
       delete writeback_handler;
-      writeback_handler = NULL;
+      writeback_handler = nullptr;
     }
     if (object_set) {
       delete object_set;
-      object_set = NULL;
+      object_set = nullptr;
     }
     delete[] format_string;
+    format_string = nullptr;
 
     md_ctx.aio_flush();
     data_ctx.aio_flush();
     io_work_queue->drain();
 
-    delete journal_policy;
-    delete exclusive_lock_policy;
     delete io_work_queue;
-    delete operations;
+    io_work_queue = nullptr;
+
     delete state;
+    state = nullptr;
   }
 
   void ImageCtx::init() {

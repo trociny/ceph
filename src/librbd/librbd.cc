@@ -30,6 +30,7 @@
 #include "librbd/api/DiffIterate.h"
 #include "librbd/api/Group.h"
 #include "librbd/api/Image.h"
+#include "librbd/api/Migrate.h"
 #include "librbd/api/Mirror.h"
 #include "librbd/io/AioCompletion.h"
 #include "librbd/io/ImageRequestWQ.h"
@@ -1266,6 +1267,34 @@ namespace librbd {
     int r = librbd::api::Image<>::deep_copy(ictx, dest_io_ctx, destname, opts,
                                             prog_ctx);
     tracepoint(librbd, deep_copy_exit, r);
+    return r;
+  }
+
+  int Image::migrate(IoCtx& dest_io_ctx, const char *destname,
+                     ImageOptions& opts)
+  {
+    ImageCtx *ictx = (ImageCtx *)ctx;
+    tracepoint(librbd, migrate_enter, ictx, ictx->name.c_str(),
+               dest_io_ctx.get_pool_name().c_str(), dest_io_ctx.get_id(),
+               destname, opts.opts);
+    librbd::NoOpProgressContext prog_ctx;
+    int r = librbd::api::Migrate<>::migrate(ictx, dest_io_ctx, destname, opts,
+                                            prog_ctx);
+    tracepoint(librbd, migrate_exit, r);
+    return r;
+  }
+
+  int Image::migrate_with_progress(IoCtx& dest_io_ctx, const char *destname,
+                                   ImageOptions& opts,
+                                   librbd::ProgressContext &prog_ctx)
+  {
+    ImageCtx *ictx = (ImageCtx *)ctx;
+    tracepoint(librbd, migrate_enter, ictx, ictx->name.c_str(),
+               dest_io_ctx.get_pool_name().c_str(), dest_io_ctx.get_id(),
+               destname, opts.opts);
+    int r = librbd::api::Migrate<>::migrate(ictx, dest_io_ctx, destname, opts,
+                                            prog_ctx);
+    tracepoint(librbd, migrate_exit, r);
     return r;
   }
 
@@ -2640,6 +2669,43 @@ extern "C" int rbd_deep_copy_with_progress(rbd_image_t image,
                                             prog_ctx);
   tracepoint(librbd, deep_copy_exit, ret);
   return ret;
+}
+
+extern "C" int rbd_migrate(rbd_image_t image, rados_ioctx_t dest_p,
+                           const char *destname, rbd_image_options_t dest_opts)
+{
+  librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+  librados::IoCtx dest_io_ctx;
+  librados::IoCtx::from_rados_ioctx_t(dest_p, dest_io_ctx);
+  tracepoint(librbd, migrate_enter, ictx, ictx->name.c_str(),
+             dest_io_ctx.get_pool_name().c_str(), dest_io_ctx.get_id(),
+             destname, dest_opts);
+  librbd::ImageOptions dest_opts_(dest_opts);
+  librbd::NoOpProgressContext prog_ctx;
+  int r = librbd::api::Migrate<>::migrate(ictx, dest_io_ctx, destname, dest_opts_,
+                                          prog_ctx);
+  tracepoint(librbd, migrate_exit, r);
+  return r;
+}
+
+extern "C" int rbd_migrate_with_progress(rbd_image_t image,
+                                         rados_ioctx_t dest_p,
+                                         const char *destname,
+                                         rbd_image_options_t dest_opts,
+                                         librbd_progress_fn_t fn, void *data)
+{
+  librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+  librados::IoCtx dest_io_ctx;
+  librados::IoCtx::from_rados_ioctx_t(dest_p, dest_io_ctx);
+  tracepoint(librbd, migrate_enter, ictx, ictx->name.c_str(),
+             dest_io_ctx.get_pool_name().c_str(), dest_io_ctx.get_id(),
+             destname, dest_opts);
+  librbd::ImageOptions dest_opts_(dest_opts);
+  librbd::CProgressContext prog_ctx(fn, data);
+  int r = librbd::api::Migrate<>::migrate(ictx, dest_io_ctx, destname, dest_opts_,
+                                          prog_ctx);
+  tracepoint(librbd, migrate_exit, r);
+  return r;
 }
 
 extern "C" int rbd_flatten(rbd_image_t image)
