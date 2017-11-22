@@ -2501,3 +2501,27 @@ TEST_F(TestClsRbd, op_features)
   ASSERT_EQ(0, get_features(&ioctx, oid, CEPH_NOSNAP, &features));
   ASSERT_EQ(0u, features);
 }
+
+TEST_F(TestClsRbd, migration)
+{
+  librados::IoCtx ioctx;
+  ASSERT_EQ(0, _rados.ioctx_create(_pool_name.c_str(), ioctx));
+
+  string oid = get_temp_image_name();
+  ASSERT_EQ(0, ioctx.create(oid, false));
+
+  cls::rbd::MigrationSpec migration_spec(cls::rbd::MIGRATION_TYPE_DST, 1,
+                                         "name", "id", {}, 0, false);
+  cls::rbd::MigrationSpec read_migration_spec;
+
+  ASSERT_EQ(-ENOENT, migration_get(&ioctx, oid, &read_migration_spec));
+
+  ASSERT_EQ(0, migration_set(&ioctx, oid, migration_spec));
+  ASSERT_EQ(0, migration_get(&ioctx, oid, &read_migration_spec));
+  ASSERT_EQ(migration_spec, read_migration_spec);
+
+  ASSERT_EQ(-EEXIST, migration_set(&ioctx, oid, migration_spec));
+  ASSERT_EQ(0, migration_remove(&ioctx, oid));
+
+  ioctx.close();
+}

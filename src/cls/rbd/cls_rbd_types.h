@@ -511,6 +511,62 @@ std::ostream& operator<<(std::ostream& os, const MirrorImageMap &image_map);
 
 WRITE_CLASS_ENCODER(MirrorImageMap);
 
+enum MigrationType {
+  MIGRATION_TYPE_SRC = 1,
+  MIGRATION_TYPE_DST = 2,
+};
+
+inline void encode(const MigrationType &type, bufferlist& bl) {
+  using ceph::encode;
+  encode(static_cast<uint8_t>(type), bl);
+}
+
+inline void decode(MigrationType &type, bufferlist::iterator& it) {
+  uint8_t int_type;
+  using ceph::decode;
+  decode(int_type, it);
+  type = static_cast<MigrationType>(int_type);
+}
+
+std::ostream& operator<<(std::ostream& os, const MigrationType& migration_type);
+
+struct MigrationSpec {
+  MigrationType type = MIGRATION_TYPE_SRC;
+  int64_t pool_id = 0;
+  std::string image_name;
+  std::string image_id;
+  std::map<uint64_t, uint64_t> snap_seqs;
+  uint64_t overlap = 0;
+  bool mirroring = false;
+
+  MigrationSpec() {
+  }
+  MigrationSpec(MigrationType type, int64_t pool_id,
+                const std::string &image_name, const std::string &image_id,
+                const std::map<uint64_t, uint64_t> &snap_seqs, uint64_t overlap,
+                bool mirroring)
+    : type(type), pool_id(pool_id), image_name(image_name), image_id(image_id),
+      snap_seqs(snap_seqs), overlap(overlap), mirroring(mirroring) {
+  }
+
+  void encode(bufferlist &bl) const;
+  void decode(bufferlist::iterator& it);
+  void dump(Formatter *f) const;
+
+  static void generate_test_instances(std::list<MigrationSpec*> &o);
+
+  inline bool operator==(const MigrationSpec& ms) const {
+    return type == ms.type && pool_id == ms.pool_id &&
+      image_name == ms.image_name && image_id == ms.image_id &&
+      snap_seqs == ms.snap_seqs && overlap == ms.overlap &&
+      mirroring == ms.mirroring;
+  }
+};
+
+std::ostream& operator<<(std::ostream& os, const MigrationSpec& migration_spec);
+
+WRITE_CLASS_ENCODER(MigrationSpec);
+
 } // namespace rbd
 } // namespace cls
 
