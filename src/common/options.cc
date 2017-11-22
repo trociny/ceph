@@ -5681,7 +5681,8 @@ static std::vector<Option> get_rbd_options() {
         {RBD_FEATURE_NAME_JOURNALING, RBD_FEATURE_JOURNALING},
         {RBD_FEATURE_NAME_DATA_POOL, RBD_FEATURE_DATA_POOL},
       };
-      static_assert((RBD_FEATURE_DATA_POOL << 1) > RBD_FEATURES_ALL,
+      static_assert((RBD_FEATURE_DATA_POOL << 1) >
+                    (RBD_FEATURES_ALL & ~RBD_FEATURES_INTERNAL),
                     "new RBD feature added");
 
       // convert user-friendly comma delimited feature name list to a bitmask

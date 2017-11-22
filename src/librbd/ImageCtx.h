@@ -161,6 +161,8 @@ namespace librbd {
 
     ContextWQ *op_work_queue;
 
+    bool ignore_migrating = false;
+
     // Configuration
     static const string METADATA_CONF_PREFIX;
     bool non_blocking_aio;
@@ -229,6 +231,7 @@ namespace librbd {
     ImageCtx(const std::string &image_name, const std::string &image_id,
 	     const char *snap, IoCtx& p, bool read_only);
     ~ImageCtx();
+    void clear_state();
     void init();
     void init_cache();
     void shutdown();

@@ -25,6 +25,7 @@ set(librbd_internal_srcs
   api/DiffIterate.cc
   api/Group.cc
   api/Image.cc
+  api/Migrate.cc
   api/Mirror.cc
   cache/ImageWriteback.cc
   cache/PassthroughImageCache.cc
@@ -95,6 +96,7 @@ set(librbd_internal_srcs
   operation/FlattenRequest.cc
   operation/MetadataRemoveRequest.cc
   operation/MetadataSetRequest.cc
+  operation/MigrateRequest.cc
   operation/ObjectMapIterate.cc
   operation/RebuildObjectMapRequest.cc
   operation/RenameRequest.cc

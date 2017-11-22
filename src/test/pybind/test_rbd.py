@@ -1607,3 +1607,22 @@ class TestTrash(object):
         RBD().trash_move(ioctx, image_name, 1000)
         RBD().trash_restore(ioctx, image_id, image_name)
         remove_image()
+
+class TestMigrate(object):
+
+    def test_migrate(self):
+        create_image()
+        RBD().migrate(ioctx, image_name, ioctx, image_name, features=63,
+                      order=23, stripe_unit=1<<23, stripe_count=1,
+                      data_pool=None)
+        remove_image()
+
+    def test_migrate_abort(self):
+        create_image()
+        try:
+            RBD().migrate(ioctx, image_name, ioctx, image_name,
+                          data_pool="INVALID_DATA_POOL")
+        except ImageNotFound:
+            pass
+        RBD().migrate_abort(ioctx, image_name)
+        remove_image()

@@ -98,6 +98,17 @@ public:
   typedef RefreshRequest<MockRefreshImageCtx> MockRefreshRequest;
   typedef RefreshParentRequest<MockRefreshImageCtx> MockRefreshParentRequest;
 
+  void set_v1_migration_header(ImageCtx *ictx) {
+    bufferlist hdr;
+    ASSERT_EQ(0, read_header_bl(ictx->md_ctx, ictx->header_oid, hdr, nullptr));
+    ASSERT_TRUE(hdr.length() >= sizeof(rbd_obj_header_ondisk));
+    ASSERT_EQ(0, memcmp(RBD_HEADER_TEXT, hdr.c_str(), sizeof(RBD_HEADER_TEXT)));
+
+    bufferlist::iterator it = hdr.begin();
+    it.copy_in(sizeof(RBD_MIGRATE_HEADER_TEXT), RBD_MIGRATE_HEADER_TEXT);
+    ASSERT_EQ(0, ictx->md_ctx.write(ictx->header_oid, hdr, hdr.length(), 0));
+  }
+
   void expect_set_require_lock(MockRefreshImageCtx &mock_image_ctx,
                                librbd::io::Direction direction, bool enabled) {
     EXPECT_CALL(*mock_image_ctx.io_work_queue, set_require_lock(direction,
@@ -153,6 +164,17 @@ public:
       EXPECT_CALL(get_mock_io_ctx(mock_image_ctx.md_ctx),
                   exec(mock_image_ctx.header_oid, _, StrEq("lock"), StrEq("get_info"), _, _, _))
                     .WillOnce(DoDefault());
+    }
+  }
+
+  void expect_get_migration_header(MockRefreshImageCtx &mock_image_ctx, int r) {
+    auto &expect = EXPECT_CALL(get_mock_io_ctx(mock_image_ctx.md_ctx),
+                               exec(mock_image_ctx.header_oid, _, StrEq("rbd"),
+                                    StrEq("migration_get"), _, _, _));
+    if (r < 0) {
+      expect.WillOnce(Return(r));
+    } else {
+      expect.WillOnce(DoDefault());
     }
   }
 
@@ -606,6 +628,224 @@ TEST_F(TestMockImageRefreshRequest, SuccessChildDontOpenParent) {
   req->send();
 
   ASSERT_EQ(0, ctx.wait());
+}
+
+TEST_F(TestMockImageRefreshRequest, SuccessMigrateV1) {
+  REQUIRE_FORMAT_V1();
+
+  librbd::ImageCtx *ictx;
+  ASSERT_EQ(0, open_image(m_image_name, &ictx));
+
+  cls::rbd::MigrationSpec migration_spec = {cls::rbd::MIGRATION_TYPE_DST,
+                                            cls::rbd::MIGRATION_STATE_STARTED,
+                                            1, "", "image id", {}, 123, false};
+  ASSERT_EQ(0, cls_client::migration_set(&m_ioctx, ictx->header_oid,
+                                         migration_spec));
+
+  set_v1_migration_header(ictx);
+
+  MockRefreshImageCtx mock_image_ctx(*ictx);
+  expect_op_work_queue(mock_image_ctx);
+  expect_test_features(mock_image_ctx);
+
+  InSequence seq;
+  expect_v1_read_header(mock_image_ctx, 0);
+  expect_get_migration_header(mock_image_ctx, 0);
+  expect_v1_get_snapshots(mock_image_ctx, 0);
+  expect_v1_get_locks(mock_image_ctx, 0);
+  expect_init_layout(mock_image_ctx);
+
+  C_SaferCond ctx;
+  MockRefreshRequest *req = new MockRefreshRequest(mock_image_ctx, false, false, &ctx);
+  req->send();
+
+  ASSERT_EQ(0, ctx.wait());
+}
+
+TEST_F(TestMockImageRefreshRequest, EnoentRetryMigrateV1) {
+  REQUIRE_FORMAT_V1();
+
+  librbd::ImageCtx *ictx;
+  ASSERT_EQ(0, open_image(m_image_name, &ictx));
+
+  cls::rbd::MigrationSpec migration_spec = {cls::rbd::MIGRATION_TYPE_DST,
+                                            cls::rbd::MIGRATION_STATE_STARTED,
+                                            1, "", "image id", {}, 123, false};
+  ASSERT_EQ(0, cls_client::migration_set(&m_ioctx, ictx->header_oid,
+                                         migration_spec));
+
+  set_v1_migration_header(ictx);
+
+  MockRefreshImageCtx mock_image_ctx(*ictx);
+  expect_op_work_queue(mock_image_ctx);
+  expect_test_features(mock_image_ctx);
+
+  InSequence seq;
+  expect_v1_read_header(mock_image_ctx, 0);
+  expect_get_migration_header(mock_image_ctx, -ENOENT);
+  expect_v1_read_header(mock_image_ctx, 0);
+  expect_get_migration_header(mock_image_ctx, 0);
+  expect_v1_get_snapshots(mock_image_ctx, 0);
+  expect_v1_get_locks(mock_image_ctx, 0);
+  expect_init_layout(mock_image_ctx);
+
+  C_SaferCond ctx;
+  MockRefreshRequest *req = new MockRefreshRequest(mock_image_ctx, false, false, &ctx);
+  req->send();
+
+  ASSERT_EQ(0, ctx.wait());
+}
+
+TEST_F(TestMockImageRefreshRequest, ErrorMigrateV1) {
+  REQUIRE_FORMAT_V1();
+
+  librbd::ImageCtx *ictx;
+  ASSERT_EQ(0, open_image(m_image_name, &ictx));
+
+  cls::rbd::MigrationSpec migration_spec = {cls::rbd::MIGRATION_TYPE_DST,
+                                            cls::rbd::MIGRATION_STATE_STARTED,
+                                            1, "", "image id", {}, 123, false};
+  ASSERT_EQ(0, cls_client::migration_set(&m_ioctx, ictx->header_oid,
+                                         migration_spec));
+
+  set_v1_migration_header(ictx);
+
+  MockRefreshImageCtx mock_image_ctx(*ictx);
+  expect_op_work_queue(mock_image_ctx);
+  expect_test_features(mock_image_ctx);
+
+  InSequence seq;
+  expect_v1_read_header(mock_image_ctx, 0);
+  expect_get_migration_header(mock_image_ctx, -EINVAL);
+
+  C_SaferCond ctx;
+  MockRefreshRequest *req = new MockRefreshRequest(mock_image_ctx, false, false, &ctx);
+  req->send();
+
+  ASSERT_EQ(-EINVAL, ctx.wait());
+}
+
+TEST_F(TestMockImageRefreshRequest, SuccessMigrateV2) {
+  REQUIRE_FORMAT_V2();
+
+  librbd::ImageCtx *ictx;
+
+  ASSERT_EQ(0, open_image(m_image_name, &ictx));
+
+  MockRefreshImageCtx mock_image_ctx(*ictx);
+  MockRefreshParentRequest *mock_refresh_parent_request = new MockRefreshParentRequest();
+  MockExclusiveLock mock_exclusive_lock;
+
+  cls::rbd::MigrationSpec migration_spec = {cls::rbd::MIGRATION_TYPE_DST,
+                                            cls::rbd::MIGRATION_STATE_STARTED,
+                                            1, "", "image id", {}, 123, false};
+  ASSERT_EQ(0, cls_client::migration_set(&m_ioctx, ictx->header_oid,
+                                         migration_spec));
+  ASSERT_EQ(0, cls_client::set_features(&m_ioctx, ictx->header_oid,
+                                        RBD_FEATURE_MIGRATING,
+                                        RBD_FEATURE_MIGRATING));
+  mock_image_ctx.features |= RBD_FEATURE_MIGRATING;
+
+  expect_op_work_queue(mock_image_ctx);
+  expect_test_features(mock_image_ctx);
+
+  InSequence seq;
+  expect_get_mutable_metadata(mock_image_ctx, 0);
+  expect_get_migration_header(mock_image_ctx, 0);
+  expect_get_metadata(mock_image_ctx, 0);
+  expect_apply_metadata(mock_image_ctx, 0);
+  expect_get_flags(mock_image_ctx, 0);
+  expect_get_group(mock_image_ctx, 0);
+  expect_refresh_parent_is_required(*mock_refresh_parent_request, true);
+  expect_refresh_parent_send(mock_image_ctx, *mock_refresh_parent_request, 0);
+  if (ictx->test_features(RBD_FEATURE_EXCLUSIVE_LOCK)) {
+    expect_init_exclusive_lock(mock_image_ctx, mock_exclusive_lock, 0);
+  }
+  expect_refresh_parent_apply(*mock_refresh_parent_request);
+  expect_refresh_parent_finalize(mock_image_ctx, *mock_refresh_parent_request, 0);
+
+  C_SaferCond ctx;
+  MockRefreshRequest *req = new MockRefreshRequest(mock_image_ctx, false, false, &ctx);
+  req->send();
+
+  ASSERT_EQ(0, ctx.wait());
+}
+
+TEST_F(TestMockImageRefreshRequest, EnoentRetryMigrateV2) {
+  REQUIRE_FORMAT_V2();
+
+  librbd::ImageCtx *ictx;
+
+  ASSERT_EQ(0, open_image(m_image_name, &ictx));
+
+  MockRefreshImageCtx mock_image_ctx(*ictx);
+  MockRefreshParentRequest *mock_refresh_parent_request = new MockRefreshParentRequest();
+  MockExclusiveLock mock_exclusive_lock;
+
+  cls::rbd::MigrationSpec migration_spec = {cls::rbd::MIGRATION_TYPE_DST,
+                                            cls::rbd::MIGRATION_STATE_STARTED,
+                                            1, "", "image id", {}, 123, false};
+  ASSERT_EQ(0, cls_client::migration_set(&m_ioctx, ictx->header_oid,
+                                         migration_spec));
+  ASSERT_EQ(0, cls_client::set_features(&m_ioctx, ictx->header_oid,
+                                        RBD_FEATURE_MIGRATING,
+                                        RBD_FEATURE_MIGRATING));
+  mock_image_ctx.features |= RBD_FEATURE_MIGRATING;
+
+  expect_op_work_queue(mock_image_ctx);
+  expect_test_features(mock_image_ctx);
+
+  InSequence seq;
+  expect_get_mutable_metadata(mock_image_ctx, 0);
+  expect_get_migration_header(mock_image_ctx, -ENOENT);
+  expect_get_mutable_metadata(mock_image_ctx, 0);
+  expect_get_migration_header(mock_image_ctx, 0);
+  expect_get_metadata(mock_image_ctx, 0);
+  expect_apply_metadata(mock_image_ctx, 0);
+  expect_get_flags(mock_image_ctx, 0);
+  expect_get_group(mock_image_ctx, 0);
+  expect_refresh_parent_is_required(*mock_refresh_parent_request, true);
+  expect_refresh_parent_send(mock_image_ctx, *mock_refresh_parent_request, 0);
+  if (ictx->test_features(RBD_FEATURE_EXCLUSIVE_LOCK)) {
+    expect_init_exclusive_lock(mock_image_ctx, mock_exclusive_lock, 0);
+  }
+  expect_refresh_parent_apply(*mock_refresh_parent_request);
+  expect_refresh_parent_finalize(mock_image_ctx, *mock_refresh_parent_request, 0);
+
+  C_SaferCond ctx;
+  MockRefreshRequest *req = new MockRefreshRequest(mock_image_ctx, false, false, &ctx);
+  req->send();
+
+  ASSERT_EQ(0, ctx.wait());
+}
+
+TEST_F(TestMockImageRefreshRequest, ErrorMigrateV2) {
+  REQUIRE_FORMAT_V2();
+
+  librbd::ImageCtx *ictx;
+
+  ASSERT_EQ(0, open_image(m_image_name, &ictx));
+
+  MockRefreshImageCtx mock_image_ctx(*ictx);
+  MockExclusiveLock mock_exclusive_lock;
+
+  ASSERT_EQ(0, cls_client::set_features(&m_ioctx, ictx->header_oid,
+                                        RBD_FEATURE_MIGRATING,
+                                        RBD_FEATURE_MIGRATING));
+  mock_image_ctx.features |= RBD_FEATURE_MIGRATING;
+
+  expect_op_work_queue(mock_image_ctx);
+  expect_test_features(mock_image_ctx);
+
+  InSequence seq;
+  expect_get_mutable_metadata(mock_image_ctx, 0);
+  expect_get_migration_header(mock_image_ctx, -EINVAL);
+
+  C_SaferCond ctx;
+  MockRefreshRequest *req = new MockRefreshRequest(mock_image_ctx, false, false, &ctx);
+  req->send();
+
+  ASSERT_EQ(-EINVAL, ctx.wait());
 }
 
 TEST_F(TestMockImageRefreshRequest, DisableExclusiveLock) {

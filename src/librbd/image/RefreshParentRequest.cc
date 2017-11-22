@@ -107,7 +107,8 @@ void RefreshParentRequest<I>::send_open_parent() {
 
   // since we don't know the image and snapshot name, set their ids and
   // reset the snap_name and snap_exists fields after we read the header
-  m_parent_image_ctx = new I("", m_parent_md.spec.image_id, NULL, parent_io_ctx,
+  m_parent_image_ctx = new I(m_parent_md.spec.image_name,
+                             m_parent_md.spec.image_id, NULL, parent_io_ctx,
                              true);
   m_parent_image_ctx->child = &m_child_image_ctx;
 
@@ -144,6 +145,10 @@ Context *RefreshParentRequest<I>::handle_open_parent(int *result) {
     delete m_parent_image_ctx;
     m_parent_image_ctx = nullptr;
 
+    return m_on_finish;
+  }
+
+  if (m_parent_md.spec.snap_id == CEPH_NOSNAP) {
     return m_on_finish;
   }
 
