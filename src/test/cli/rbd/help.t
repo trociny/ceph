@@ -61,6 +61,7 @@ Skip test on FreeBSD as it generates different output there.
       map                                 Map image to a block device using the
                                           kernel.
       merge-diff                          Merge two diff exports together.
+      migrate                             Migrate src image to dest.
       mirror image demote                 Demote an image to non-primary for RBD
                                           mirroring.
       mirror image disable                Disable RBD mirroring for an image.
@@ -1038,6 +1039,56 @@ Skip test on FreeBSD as it generates different output there.
   Optional arguments
     --path arg           path to merged diff (or '-' for stdout)
     --no-progress        disable progress output
+  
+  rbd help migrate
+  usage: rbd migrate [--pool <pool>] [--image <image>] [--dest-pool <dest-pool>] 
+                     [--dest <dest>] [--image-format <image-format>] 
+                     [--new-format] [--order <order>] 
+                     [--object-size <object-size>] 
+                     [--image-feature <image-feature>] [--image-shared] 
+                     [--stripe-unit <stripe-unit>] 
+                     [--stripe-count <stripe-count>] [--data-pool <data-pool>] 
+                     [--journal-splay-width <journal-splay-width>] 
+                     [--journal-object-size <journal-object-size>] 
+                     [--journal-pool <journal-pool>] [--no-progress] [--abort] 
+                     <source-image-spec> <dest-image-spec> 
+  
+  Migrate src image to dest.
+  
+  Positional arguments
+    <source-image-spec>       source image specification
+                              (example: [<pool-name>/]<image-name>)
+    <dest-image-spec>         destination image specification
+                              (example: [<pool-name>/]<image-name>)
+  
+  Optional arguments
+    -p [ --pool ] arg         source pool name
+    --image arg               source image name
+    --dest-pool arg           destination pool name
+    --dest arg                destination image name
+    --image-format arg        image format [1 (deprecated) or 2]
+    --new-format              use image format 2
+                              (deprecated)
+    --order arg               object order [12 <= order <= 25]
+    --object-size arg         object size in B/K/M [4K <= object size <= 32M]
+    --image-feature arg       image features
+                              [layering(+), striping, exclusive-lock(+*),
+                              object-map(+*), fast-diff(+*), deep-flatten(+-),
+                              journaling(*), data-pool]
+    --image-shared            shared image
+    --stripe-unit arg         stripe unit in B/K/M
+    --stripe-count arg        stripe count
+    --data-pool arg           data pool
+    --journal-splay-width arg number of active journal objects
+    --journal-object-size arg size of journal objects
+    --journal-pool arg        pool for journal objects
+    --no-progress             disable progress output
+    --abort                   cancel previously started but interrupted migration
+  
+  Image Features:
+    (*) supports enabling/disabling on existing images
+    (-) supports disabling-only on existing images
+    (+) enabled by default for new images if features not specified
   
   rbd help mirror image demote
   usage: rbd mirror image demote [--pool <pool>] [--image <image>] 

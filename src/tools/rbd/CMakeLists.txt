@@ -24,6 +24,7 @@ set(rbd_srcs
   action/List.cc
   action/Lock.cc
   action/MergeDiff.cc
+  action/Migrate.cc
   action/MirrorPool.cc
   action/MirrorImage.cc
   action/Nbd.cc

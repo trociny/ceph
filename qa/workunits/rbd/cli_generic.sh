@@ -492,6 +492,47 @@ test_purge(){
     rbd trash rm $LAST_IMG --force --no-progress | grep -v '.' | wc -l | grep 0
 }
 
+test_migrate() {
+    echo "testing migrate..."
+    remove_images
+    rados mkpool rbd2
+
+    # Convert to new format
+    rbd create --image-format 1 -s 128M test1
+    rbd info test1 | grep 'format: 1'
+    rbd migrate test1 --image-format 2
+    rbd info test1 | grep 'format: 2'
+
+    # Enable layering (and some other features)
+    rbd info test1 | grep 'features: .*layering' && exit 1 || true
+    rbd migrate test1 --image-feature \
+        layering,exclusive-lock,object-map,fast-diff,deep-flatten
+    rbd info test1 | grep 'features: .*layering'
+
+    # Migrate to other pool
+    rbd migrate test1 rbd2/test1
+    rbd ls | wc -l | grep '^0$'
+    rbd -p rbd2 ls | grep test1
+
+    # Enable data pool
+    rbd create -s 128M test1
+    rbd migrate test1 --data-pool rbd2
+    rbd info test1 | grep 'data_pool: rbd2'
+
+    # Abort failed migration
+    for format in 1 2; do
+        rbd create -s 128M --image-format ${format} test2
+        rbd migrate test2 --data-pool INVALID_DATA_POOL && exit 1 || true
+        rbd bench --io-type write test2 && exit 1 || true
+        rbd migrate --abort test2
+        rbd bench --io-type write --io-size 1024 --io-total 1024 test2
+        rbd rm test2
+    done
+
+    remove_images
+    rados rmpool rbd2 rbd2 --yes-i-really-really-mean-it
+}
+
 test_pool_image_args
 test_rename
 test_ls
@@ -499,6 +540,7 @@ test_remove
 RBD_CREATE_ARGS=""
 test_others
 test_locking
+test_migrate
 RBD_CREATE_ARGS="--image-format 2"
 test_others
 test_locking
