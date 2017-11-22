@@ -307,6 +307,24 @@ CEPH_RBD_API int rbd_trash_remove_with_progress(rados_ioctx_t io, const char *id
 CEPH_RBD_API int rbd_trash_restore(rados_ioctx_t io, const char *id,
                                    const char *name);
 
+/* migrate */
+CEPH_RBD_API int rbd_migrate(rados_ioctx_t ioctx, const char *image_name,
+                             rados_ioctx_t dest_ioctx,
+                             const char *dest_image_name,
+                             rbd_image_options_t opts);
+CEPH_RBD_API int rbd_migrate_with_progress(rados_ioctx_t ioctx,
+                                           const char *image_name,
+                                           rados_ioctx_t dest_ioctx,
+                                           const char *dest_image_name,
+                                           rbd_image_options_t opts,
+                                           librbd_progress_fn_t cb,
+                                           void *cbdata);
+CEPH_RBD_API int rbd_migrate_abort(rados_ioctx_t ioctx, const char *image_name);
+CEPH_RBD_API int rbd_migrate_abort_with_progress(rados_ioctx_t ioctx,
+                                                 const char *image_name,
+                                                 librbd_progress_fn_t cb,
+                                                 void *cbdata);
+
 /* pool mirroring */
 CEPH_RBD_API int rbd_mirror_mode_get(rados_ioctx_t io_ctx,
                                      rbd_mirror_mode_t *mirror_mode);

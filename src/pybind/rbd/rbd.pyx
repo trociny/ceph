@@ -237,6 +237,11 @@ cdef extern from "rbd/librbd.h" nogil:
     int rbd_trash_remove(rados_ioctx_t io, const char *id, int force)
     int rbd_trash_restore(rados_ioctx_t io, const char *id, const char *name)
 
+    int rbd_migrate(rados_ioctx_t io_ctx, const char *image_name,
+                    rados_ioctx_t dest_io_ctx, const char *dest_image_name,
+                    rbd_image_options_t opts)
+    int rbd_migrate_abort(rados_ioctx_t io_ctx, const char *image_name)
+
     int rbd_mirror_mode_get(rados_ioctx_t io, rbd_mirror_mode_t *mirror_mode)
     int rbd_mirror_mode_set(rados_ioctx_t io, rbd_mirror_mode_t mirror_mode)
     int rbd_mirror_peer_add(rados_ioctx_t io, char *uuid,
@@ -1162,6 +1167,89 @@ class RBD(object):
             ret = rbd_trash_restore(_ioctx, _image_id, _name)
         if ret != 0:
             raise make_ex(ret, 'error restoring image from trash')
+
+    def migrate(self, ioctx, image_name, dest_ioctx, dest_image_name,
+                features=None, order=None, stripe_unit=None, stripe_count=None,
+                data_pool=None):
+        """
+        Migrate an RBD image.
+
+        :param ioctx: determines which RADOS pool the image is in
+        :type ioctx: :class:`rados.Ioctx`
+        :param image_name: the current name of the image
+        :type src: str
+        :param dest_ioctx: determines which pool to migrate into
+        :type dest_ioctx: :class:`rados.Ioctx`
+        :param dest_image_name: the name of the destination image (may be the same image)
+        :type dest_image_name: str
+        :param features: bitmask of features to enable; if set, must include layering
+        :type features: int
+        :param order: the image is split into (2**order) byte objects
+        :type order: int
+        :param stripe_unit: stripe unit in bytes (default None to let librbd decide)
+        :type stripe_unit: int
+        :param stripe_count: objects to stripe over before looping
+        :type stripe_count: int
+        :param data_pool: optional separate pool for data blocks
+        :type data_pool: str
+        :raises: :class:`TypeError`
+        :raises: :class:`InvalidArgument`
+        :raises: :class:`ImageExists`
+        :raises: :class:`FunctionNotSupported`
+        :raises: :class:`ArgumentOutOfRange`
+        """
+        dest_image_name = cstr(dest_image_name, 'dest_image_name')
+        cdef:
+            rados_ioctx_t _ioctx = convert_ioctx(ioctx)
+            char *_image_name = image_name
+            rados_ioctx_t _dest_ioctx = convert_ioctx(dest_ioctx)
+            char *_dest_image_name = dest_image_name
+            rbd_image_options_t opts
+
+        rbd_image_options_create(&opts)
+        try:
+            if features is not None:
+                rbd_image_options_set_uint64(opts, RBD_IMAGE_OPTION_FEATURES,
+                                             features)
+            if order is not None:
+                rbd_image_options_set_uint64(opts, RBD_IMAGE_OPTION_ORDER,
+                                             order)
+            if stripe_unit is not None:
+                rbd_image_options_set_uint64(opts, RBD_IMAGE_OPTION_STRIPE_UNIT,
+                                             stripe_unit)
+            if stripe_count is not None:
+                rbd_image_options_set_uint64(opts, RBD_IMAGE_OPTION_STRIPE_COUNT,
+                                             stripe_count)
+            if data_pool is not None:
+                rbd_image_options_set_string(opts, RBD_IMAGE_OPTION_DATA_POOL,
+                                             data_pool)
+            with nogil:
+                ret = rbd_migrate(_ioctx, _image_name, _dest_ioctx,
+                                  _dest_image_name, opts)
+        finally:
+            rbd_image_options_destroy(opts)
+        if ret < 0:
+            raise make_ex(ret, 'error migrating image %s' % (image_name))
+
+    def migrate_abort(self, ioctx, image_name):
+        """
+        Cancel previously started but interrupted migration.
+
+        :param ioctx: determines which RADOS pool the image is in
+        :type ioctx: :class:`rados.Ioctx`
+        :param image_name: the name of the image
+        :type image_name: str
+        :raises: :class:`ImageNotFound`, :class:`ImageBusy`,
+                 :class:`ImageHasSnapshots`
+        """
+        image_name = cstr(image_name, 'image_name')
+        cdef:
+            rados_ioctx_t _ioctx = convert_ioctx(ioctx)
+            char *_image_name = image_name
+        with nogil:
+            ret = rbd_migrate_abort(_ioctx, _image_name)
+        if ret != 0:
+            raise make_ex(ret, 'error aborting migration')
 
     def mirror_mode_get(self, ioctx):
         """

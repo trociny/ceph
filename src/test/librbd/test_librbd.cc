@@ -6524,6 +6524,258 @@ TEST_F(TestLibRBD, TestListWatchers) {
   ASSERT_EQ(0, image.close());
 }
 
+TEST_F(TestLibRBD, Migrate) {
+  REQUIRE_FORMAT_V2();
+
+  rados_ioctx_t ioctx;
+  rados_ioctx_create(_cluster, m_pool_name.c_str(), &ioctx);
+  BOOST_SCOPE_EXIT(&ioctx) {
+    rados_ioctx_destroy(ioctx);
+  } BOOST_SCOPE_EXIT_END;
+
+  char test_data[TEST_IO_SIZE + 1];
+  for (int i = 0; i < TEST_IO_SIZE; ++i) {
+    test_data[i] = (char)(rand() % (126 - 33) + 33);
+  }
+  test_data[TEST_IO_SIZE] = '\0';
+
+  // Create and open old format image
+
+  bool old_format = true;
+  uint64_t features = 0;
+  int order = 0;
+  uint64_t size = 4 << 20;
+  std::string name = get_temp_image_name();
+  ASSERT_EQ(0, create_image_full(ioctx, name.c_str(), size, &order, old_format,
+                                 features));
+
+  {
+    rbd_image_t image;
+    ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, nullptr));
+    BOOST_SCOPE_EXIT(&image) {
+      ASSERT_EQ(0, rbd_close(image));
+    } BOOST_SCOPE_EXIT_END;
+
+    uint8_t old;
+    ASSERT_EQ(0, rbd_get_old_format(image, &old));
+    ASSERT_TRUE(old);
+    uint64_t read_features;
+    ASSERT_EQ(0, rbd_get_features(image, &read_features));
+    ASSERT_EQ(0U, read_features);
+
+    for (int i = 0; i < 5; ++i) {
+      ASSERT_PASSED(write_test_data, image, test_data, TEST_IO_SIZE * i,
+                    TEST_IO_SIZE, 0);
+    }
+  }
+
+  // Convert to new format
+
+  ASSERT_EQ(0, get_features(&old_format, &features));
+  ASSERT_FALSE(old_format);
+  features &= ~RBD_FEATURE_STRIPINGV2;
+
+  rbd_image_options_t image_options;
+  rbd_image_options_create(&image_options);
+  BOOST_SCOPE_EXIT(&image_options) {
+    rbd_image_options_destroy(image_options);
+  } BOOST_SCOPE_EXIT_END;
+
+  ASSERT_EQ(0, rbd_image_options_set_uint64(image_options,
+                                            RBD_IMAGE_OPTION_FEATURES,
+                                            features));
+
+  ASSERT_EQ(0, rbd_migrate(ioctx, name.c_str(), ioctx, name.c_str(),
+                           image_options));
+
+  {
+    rbd_image_t image;
+    ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, nullptr));
+    BOOST_SCOPE_EXIT(&image) {
+      EXPECT_EQ(0, rbd_close(image));
+    } BOOST_SCOPE_EXIT_END;
+
+    uint8_t old;
+    ASSERT_EQ(0, rbd_get_old_format(image, &old));
+    ASSERT_FALSE(old);
+    uint64_t read_features;
+    ASSERT_EQ(0, rbd_get_features(image, &read_features));
+    ASSERT_EQ(features, read_features);
+
+    for (int i = 0; i < 5; ++i) {
+      ASSERT_PASSED(read_test_data, image, test_data, TEST_IO_SIZE * i,
+                    TEST_IO_SIZE, 0);
+    }
+  }
+
+  // Enable/Disable layering
+
+  features = features ^ RBD_FEATURE_LAYERING;
+  ASSERT_EQ(0, rbd_image_options_set_uint64(image_options,
+                                            RBD_IMAGE_OPTION_FEATURES,
+                                            features));
+  ASSERT_EQ(0, rbd_migrate(ioctx, name.c_str(), ioctx, name.c_str(),
+                           image_options));
+
+  {
+    rbd_image_t image;
+    ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, nullptr));
+    BOOST_SCOPE_EXIT(&image) {
+      ASSERT_EQ(0, rbd_close(image));
+    } BOOST_SCOPE_EXIT_END;
+
+    uint64_t read_features;
+    ASSERT_EQ(0, rbd_get_features(image, &read_features));
+    ASSERT_EQ(features, read_features);
+
+
+  // Add snapshots
+
+    ASSERT_EQ(0, rbd_snap_create(image, "snap1"));
+
+    for (int i = 2; i < 7; ++i) {
+      ASSERT_PASSED(discard_test_data, image, TEST_IO_SIZE * i,
+                    TEST_IO_SIZE);
+    }
+
+    ASSERT_EQ(0, rbd_snap_create(image, "snap2"));
+
+    for (int i = 4; i < 9; ++i) {
+      ASSERT_PASSED(write_test_data, image, test_data, TEST_IO_SIZE * i,
+                    TEST_IO_SIZE, 0);
+    }
+  }
+
+  std::string new_name = get_temp_image_name();
+
+  ASSERT_EQ(0, rbd_image_options_unset(image_options,
+                                       RBD_IMAGE_OPTION_FEATURES));
+
+  ASSERT_EQ(0, rbd_migrate(ioctx, name.c_str(), ioctx, new_name.c_str(),
+                           image_options));
+
+  {
+    rbd_image_t image;
+    ASSERT_EQ(-ENOENT, rbd_open(ioctx, name.c_str(), &image, nullptr));
+    name = new_name;
+    ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, nullptr));
+    ASSERT_EQ(0, rbd_close(image));
+  }
+
+  bool skip_discard = is_skip_partial_discard_enabled();
+
+  char zero_data[TEST_IO_SIZE + 1];
+  memset(zero_data, 0, sizeof(zero_data));
+
+  // Migrate to other pool
+
+  rados_ioctx_t dst_ioctx;
+  rados_ioctx_create(_cluster, create_pool(true).c_str(), &dst_ioctx);
+  BOOST_SCOPE_EXIT(&dst_ioctx) {
+    rados_ioctx_destroy(dst_ioctx);
+  } BOOST_SCOPE_EXIT_END;
+  rbd_image_options_destroy(image_options);
+  rbd_image_options_create(&image_options);
+
+  ASSERT_EQ(0, rbd_migrate(ioctx, name.c_str(), dst_ioctx, name.c_str(),
+                           image_options));
+
+  // Migrate data pool
+
+  ASSERT_EQ(0, rbd_image_options_set_string(image_options,
+                                            RBD_IMAGE_OPTION_DATA_POOL,
+                                            m_pool_name.c_str()));
+  ASSERT_EQ(0, rbd_migrate(dst_ioctx, name.c_str(), dst_ioctx, name.c_str(),
+                           image_options));
+
+  // Check
+
+  rbd_image_t image;
+  ASSERT_EQ(0, rbd_open(dst_ioctx, name.c_str(), &image, nullptr));
+  BOOST_SCOPE_EXIT(&image) {
+    ASSERT_EQ(0, rbd_close(image));
+  } BOOST_SCOPE_EXIT_END;
+
+  for (int i = 0; i < 9; ++i) {
+    if (i >= 2 && i < 4) {
+      ASSERT_PASSED(read_test_data, image, skip_discard ? test_data : zero_data,
+                    TEST_IO_SIZE * i, TEST_IO_SIZE, 0);
+    } else {
+      ASSERT_PASSED(read_test_data, image, test_data, TEST_IO_SIZE * i,
+                    TEST_IO_SIZE, 0);
+    }
+  }
+
+  rbd_snap_set(image, "snap2");
+
+  for (int i = 0; i < 7; ++i) {
+    if (i >= 2) {
+      ASSERT_PASSED(read_test_data, image, skip_discard ? test_data : zero_data,
+                    TEST_IO_SIZE * i, TEST_IO_SIZE, 0);
+    } else {
+      ASSERT_PASSED(read_test_data, image, test_data, TEST_IO_SIZE * i,
+                    TEST_IO_SIZE, 0);
+    }
+  }
+
+  rbd_snap_set(image, "snap1");
+
+  for (int i = 0; i < 5; ++i) {
+    ASSERT_PASSED(read_test_data, image, test_data, TEST_IO_SIZE * i,
+                  TEST_IO_SIZE, 0);
+  }
+}
+
+TEST_F(TestLibRBD, MigrateAbort) {
+  rados_ioctx_t ioctx;
+  ASSERT_EQ(0, rados_ioctx_create(_cluster, m_pool_name.c_str(), &ioctx));
+  BOOST_SCOPE_EXIT(&ioctx) {
+    rados_ioctx_destroy(ioctx);
+  } BOOST_SCOPE_EXIT_END;
+
+  char test_data[TEST_IO_SIZE + 1];
+  for (int i = 0; i < TEST_IO_SIZE; ++i) {
+    test_data[i] = (char)(rand() % (126 - 33) + 33);
+  }
+  test_data[TEST_IO_SIZE] = '\0';
+
+  int order = 0;
+  std::string name = get_temp_image_name();
+  uint64_t size = 2 << 20;
+
+  ASSERT_EQ(0, create_image(ioctx, name.c_str(), size, &order));
+
+  {
+    rbd_image_t image;
+    ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, nullptr));
+    BOOST_SCOPE_EXIT(&image) {
+      EXPECT_EQ(0, rbd_close(image));
+    } BOOST_SCOPE_EXIT_END;
+
+    ASSERT_PASSED(write_test_data, image, test_data, TEST_IO_SIZE, TEST_IO_SIZE,
+                  0);
+  }
+
+  rbd_image_options_t image_options;
+  rbd_image_options_create(&image_options);
+  BOOST_SCOPE_EXIT(&image_options) {
+    rbd_image_options_destroy(image_options);
+  } BOOST_SCOPE_EXIT_END;
+  ASSERT_EQ(0, rbd_image_options_set_string(image_options,
+                                            RBD_IMAGE_OPTION_DATA_POOL,
+                                            "INVALID_DATA_POOL"));
+  ASSERT_EQ(-ENOENT, rbd_migrate(ioctx, name.c_str(), ioctx, name.c_str(),
+                                 image_options));
+
+  rbd_image_t image;
+  ASSERT_NE(0, rbd_open(ioctx, name.c_str(), &image, nullptr));
+
+  ASSERT_EQ(0, rbd_migrate_abort(ioctx, name.c_str()));
+
+  ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, nullptr));
+  EXPECT_EQ(0, rbd_close(image));
+}
+
 // poorman's assert()
 namespace ceph {
   void __ceph_assert_fail(const char *assertion, const char *file, int line,

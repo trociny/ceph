@@ -426,6 +426,11 @@ void DisableFeaturesRequest<I>::send_append_op_event() {
   I &image_ctx = this->m_image_ctx;
   CephContext *cct = image_ctx.cct;
 
+  if ((m_features & OP_EVENT_FORBIDDEN_FEATURES) != 0) {
+    send_remove_object_map();
+    return;
+  }
+
   if (!this->template append_op_event<
       DisableFeaturesRequest<I>,
       &DisableFeaturesRequest<I>::handle_append_op_event>(this)) {

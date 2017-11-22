@@ -1812,3 +1812,22 @@ class TestGroups(object):
 def test_rename():
     rbd = RBD()
     image_name2 = get_temp_image_name()
+
+class TestMigrate(object):
+
+    def test_migrate(self):
+        create_image()
+        RBD().migrate(ioctx, image_name, ioctx, image_name, features=63,
+                      order=23, stripe_unit=1<<23, stripe_count=1,
+                      data_pool=None)
+        remove_image()
+
+    def test_migrate_abort(self):
+        create_image()
+        try:
+            RBD().migrate(ioctx, image_name, ioctx, image_name,
+                          data_pool="INVALID_DATA_POOL")
+        except ImageNotFound:
+            pass
+        RBD().migrate_abort(ioctx, image_name)
+        remove_image()
