@@ -529,5 +529,106 @@ std::ostream& operator<<(std::ostream& os,
             << image_map.mapped_time << "]";
 }
 
+std::ostream& operator<<(std::ostream& os,
+                         const MigrationType& migration_type) {
+  switch (migration_type) {
+  case MIGRATION_TYPE_SRC:
+    os << "source";
+    break;
+  case MIGRATION_TYPE_DST:
+    os << "destination";
+    break;
+  default:
+    os << "unknown (" << static_cast<uint32_t>(migration_type) << ")";
+    break;
+  }
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os,
+                         const MigrationState& migration_state) {
+  switch (migration_state) {
+  case MIGRATION_STATE_STARTED:
+    os << "started";
+    break;
+  case MIGRATION_STATE_COMPLETE:
+    os << "complete";
+    break;
+  default:
+    os << "unknown (" << static_cast<uint32_t>(migration_state) << ")";
+    break;
+  }
+  return os;
+}
+
+void MigrationSpec::encode(bufferlist& bl) const {
+  ENCODE_START(1, 1, bl);
+  ::encode(type, bl);
+  ::encode(state, bl);
+  ::encode(pool_id, bl);
+  ::encode(image_name, bl);
+  ::encode(image_id, bl);
+  ::encode(snap_seqs, bl);
+  ::encode(overlap, bl);
+  ::encode(mirroring, bl);
+  ENCODE_FINISH(bl);
+}
+
+void MigrationSpec::decode(bufferlist::iterator& bl) {
+  DECODE_START(1, bl);
+  ::decode(type, bl);
+  ::decode(state, bl);
+  ::decode(pool_id, bl);
+  ::decode(image_name, bl);
+  ::decode(image_id, bl);
+  ::decode(snap_seqs, bl);
+  ::decode(overlap, bl);
+  ::decode(mirroring, bl);
+  DECODE_FINISH(bl);
+}
+
+std::ostream& operator<<(std::ostream& os,
+                         const std::map<uint64_t, uint64_t>& snap_seqs) {
+  os << "{";
+  size_t count = 0;
+  for (auto &it : snap_seqs) {
+    os << "(" << (count++ > 0 ? ", " : "") << it.first << ", " << it.second
+       << ")";
+  }
+  os << "}";
+  return os;
+}
+
+void MigrationSpec::dump(Formatter *f) const {
+  f->dump_stream("type") << type;
+  f->dump_stream("state") << state;
+  f->dump_int("pool_id", pool_id);
+  f->dump_string("image_name", image_name);
+  f->dump_string("image_id", image_id);
+  f->dump_stream("snap_seqs") << snap_seqs;
+  f->dump_unsigned("overlap", overlap);
+  f->dump_bool("mirroring", mirroring);
+}
+
+void MigrationSpec::generate_test_instances(std::list<MigrationSpec*> &o) {
+  o.push_back(new MigrationSpec());
+  o.push_back(new MigrationSpec(MIGRATION_TYPE_SRC, MIGRATION_STATE_STARTED, 1,
+                                "image_name", "image_id", {{1, 2}}, 123, true));
+}
+
+std::ostream& operator<<(std::ostream& os,
+                         const MigrationSpec& migration_spec) {
+  os << "["
+     << "type=" << migration_spec.type << ", "
+     << "state=" << migration_spec.state << ", "
+     << "pool_id=" << migration_spec.pool_id << ", "
+     << "image_name=" << migration_spec.image_name << ", "
+     << "image_id=" << migration_spec.image_id << ", "
+     << "snap_seqs=" << migration_spec.snap_seqs << ", "
+     << "overlap=" << migration_spec.overlap << ", "
+     << "mirroring=" << migration_spec.mirroring << "]";
+  return os;
+}
+
 } // namespace rbd
 } // namespace cls

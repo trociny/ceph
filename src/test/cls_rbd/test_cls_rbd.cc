@@ -2305,3 +2305,27 @@ TEST_F(TestClsRbd, trash_methods)
   ioctx.close();
 }
 
+TEST_F(TestClsRbd, migration)
+{
+  librados::IoCtx ioctx;
+  ASSERT_EQ(0, _rados.ioctx_create(_pool_name.c_str(), ioctx));
+
+  string oid = get_temp_image_name();
+  ASSERT_EQ(0, ioctx.create(oid, false));
+
+  cls::rbd::MigrationSpec migration_spec(cls::rbd::MIGRATION_TYPE_DST,
+                                         cls::rbd::MIGRATION_STATE_STARTED,
+                                         1, "name", "id", {}, 0, false);
+  cls::rbd::MigrationSpec read_migration_spec;
+
+  ASSERT_EQ(-ENOENT, migration_get(&ioctx, oid, &read_migration_spec));
+
+  ASSERT_EQ(0, migration_set(&ioctx, oid, migration_spec));
+  ASSERT_EQ(0, migration_get(&ioctx, oid, &read_migration_spec));
+  ASSERT_EQ(migration_spec, read_migration_spec);
+
+  ASSERT_EQ(0, migration_remove(&ioctx, oid));
+
+  ioctx.close();
+}
+

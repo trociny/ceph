@@ -448,6 +448,18 @@ namespace librbd {
     int trash_get(librados::IoCtx *ioctx, const std::string &id,
                   cls::rbd::TrashImageSpec *trash_spec);
 
+    int migration_set(librados::IoCtx *ioctx, const std::string &oid,
+                    const cls::rbd::MigrationSpec &migration_spec);
+    void migration_set(librados::ObjectWriteOperation *op,
+                     const cls::rbd::MigrationSpec &migration_spec);
+    void migration_get_start(librados::ObjectReadOperation *op);
+    int migration_get_finish(bufferlist::iterator *it,
+                           cls::rbd::MigrationSpec *migration_spec);
+    int migration_get(librados::IoCtx *ioctx, const std::string &oid,
+                      cls::rbd::MigrationSpec *migration_spec);
+    int migration_remove(librados::IoCtx *ioctx, const std::string &oid);
+    void migration_remove(librados::ObjectWriteOperation *op);
+
   } // namespace cls_client
 } // namespace librbd
 #endif // CEPH_LIBRBD_CLS_RBD_CLIENT_H

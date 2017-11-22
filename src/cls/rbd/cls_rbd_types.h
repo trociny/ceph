@@ -393,6 +393,79 @@ std::ostream& operator<<(std::ostream& os, const MirrorImageMap &image_map);
 
 WRITE_CLASS_ENCODER(MirrorImageMap);
 
+enum MigrationType {
+  MIGRATION_TYPE_SRC = 1,
+  MIGRATION_TYPE_DST = 2,
+};
+
+inline void encode(const MigrationType &type, bufferlist& bl) {
+  ::encode(static_cast<uint8_t>(type), bl);
+}
+
+inline void decode(MigrationType &type, bufferlist::iterator& it) {
+  uint8_t int_type;
+  ::decode(int_type, it);
+  type = static_cast<MigrationType>(int_type);
+}
+
+std::ostream& operator<<(std::ostream& os, const MigrationType& migration_type);
+
+enum MigrationState {
+  MIGRATION_STATE_STARTED = 1,
+  MIGRATION_STATE_COMPLETE = 2,
+};
+
+inline void encode(const MigrationState &state, bufferlist& bl) {
+  ::encode(static_cast<uint8_t>(state), bl);
+}
+
+inline void decode(MigrationState &state, bufferlist::iterator& it) {
+  uint8_t int_state;
+  ::decode(int_state, it);
+  state = static_cast<MigrationState>(int_state);
+}
+
+std::ostream& operator<<(std::ostream& os,
+                         const MigrationState& migration_state);
+
+struct MigrationSpec {
+  MigrationType type = MIGRATION_TYPE_SRC;
+  MigrationState state = MIGRATION_STATE_STARTED;
+  int64_t pool_id = 0;
+  std::string image_name;
+  std::string image_id;
+  std::map<uint64_t, uint64_t> snap_seqs;
+  uint64_t overlap = 0;
+  bool mirroring = false;
+
+  MigrationSpec() {
+  }
+  MigrationSpec(MigrationType type, MigrationState state, int64_t pool_id,
+                const std::string &image_name, const std::string &image_id,
+                const std::map<uint64_t, uint64_t> &snap_seqs, uint64_t overlap,
+                bool mirroring)
+    : type(type), state(state), pool_id(pool_id), image_name(image_name),
+      image_id(image_id), snap_seqs(snap_seqs), overlap(overlap),
+      mirroring(mirroring) {
+  }
+
+  void encode(bufferlist &bl) const;
+  void decode(bufferlist::iterator& it);
+  void dump(Formatter *f) const;
+
+  static void generate_test_instances(std::list<MigrationSpec*> &o);
+
+  inline bool operator==(const MigrationSpec& ms) const {
+    return type == ms.type && state == ms.state && pool_id == ms.pool_id &&
+      image_name == ms.image_name && image_id == ms.image_id &&
+      snap_seqs == ms.snap_seqs && overlap == overlap && mirroring == mirroring;
+  }
+};
+
+std::ostream& operator<<(std::ostream& os, const MigrationSpec& migration_spec);
+
+WRITE_CLASS_ENCODER(MigrationSpec);
+
 } // namespace rbd
 } // namespace cls
 
