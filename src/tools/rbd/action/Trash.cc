@@ -170,7 +170,7 @@ int do_list(librbd::RBD &rbd, librados::IoCtx& io_ctx, bool long_flag,
     }
     for (const auto& entry : trash_entries) {
       if (!all_flag &&
-          entry.source == RBD_TRASH_IMAGE_SOURCE_MIRRORING) {
+          entry.source != RBD_TRASH_IMAGE_SOURCE_USER) {
         continue;
       }
        if (f) {
@@ -202,7 +202,7 @@ int do_list(librbd::RBD &rbd, librados::IoCtx& io_ctx, bool long_flag,
 
   for (const auto& entry : trash_entries) {
     if (!all_flag &&
-        entry.source == RBD_TRASH_IMAGE_SOURCE_MIRRORING) {
+        entry.source != RBD_TRASH_IMAGE_SOURCE_USER) {
       continue;
     }
     librbd::Image im;
@@ -228,6 +228,9 @@ int do_list(librbd::RBD &rbd, librados::IoCtx& io_ctx, bool long_flag,
         break;
       case RBD_TRASH_IMAGE_SOURCE_MIRRORING:
         del_source = "MIRRORING";
+        break;
+      case RBD_TRASH_IMAGE_SOURCE_MIGRATION:
+        del_source = "MIGRATION";
         break;
     }
 
