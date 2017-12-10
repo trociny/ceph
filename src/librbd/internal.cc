@@ -585,7 +585,7 @@ bool compare_by_name(const child_info_t& c1, const child_info_t& c2)
 
       for (auto &id_it : info.second) {
 	ImageCtx *imctx = new ImageCtx("", id_it, NULL, ioctx, false);
-	int r = imctx->state->open(false);
+	int r = imctx->state->open(0);
 	if (r < 0) {
 	  lderr(cct) << "error opening image: "
 		     << cpp_strerror(r) << dendl;
@@ -928,7 +928,7 @@ bool compare_by_name(const child_info_t& c1, const child_info_t& c2)
 
     // make sure parent snapshot exists
     ImageCtx *p_imctx = new ImageCtx(p_name, "", p_snap_name, p_ioctx, true);
-    int r = p_imctx->state->open(false);
+    int r = p_imctx->state->open(0);
     if (r < 0) {
       lderr(cct) << "error opening parent image: "
 		 << cpp_strerror(r) << dendl;
@@ -984,7 +984,7 @@ bool compare_by_name(const child_info_t& c1, const child_info_t& c2)
 		   << dstname << dendl;
 
     ImageCtx *ictx = new ImageCtx(srcname, "", "", io_ctx, false);
-    int r = ictx->state->open(false);
+    int r = ictx->state->open(0);
     if (r < 0) {
       lderr(cct) << "error opening source image: " << cpp_strerror(r) << dendl;
       return r;
@@ -1353,7 +1353,7 @@ bool compare_by_name(const child_info_t& c1, const child_info_t& c2)
 
     std::string image_id;
     ImageCtx *ictx = new ImageCtx(image_name, "", nullptr, io_ctx, false);
-    int r = ictx->state->open(true);
+    int r = ictx->state->open(OPEN_FLAG_SKIP_OPEN_PARENT);
     if (r < 0) {
       ictx = nullptr;
 
@@ -1782,7 +1782,7 @@ bool compare_by_name(const child_info_t& c1, const child_info_t& c2)
 
     ImageCtx *dest = new librbd::ImageCtx(destname, "", NULL,
 					  dest_md_ctx, false);
-    r = dest->state->open(false);
+    r = dest->state->open(0);
     if (r < 0) {
       lderr(cct) << "failed to read newly created header" << dendl;
       return r;
