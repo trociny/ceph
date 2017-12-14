@@ -12,6 +12,7 @@
 #include "librbd/journal/RemoveRequest.h"
 #include "librbd/Operations.h"
 #include "librbd/operation/TrimRequest.h"
+#include "librbd/image/ListWatchersRequest.h"
 #include "librbd/image/TypeTraits.h"
 #include "librbd/image/DetachChildRequest.h"
 #include "librbd/image/RemoveRequest.h"
@@ -157,6 +158,33 @@ public:
 DisableRequest<MockTestImageCtx> *DisableRequest<MockTestImageCtx>::s_instance;
 
 } // namespace mirror
+
+namespace image {
+
+template<>
+class ListWatchersRequest<MockTestImageCtx> {
+public:
+  static ListWatchersRequest *s_instance;
+  Context *on_finish = nullptr;
+
+  static ListWatchersRequest *create(MockTestImageCtx &image_ctx,
+                                     std::list<WatcherInfo> *watchers,
+                                     Context *on_finish) {
+    assert(s_instance != nullptr);
+    s_instance->on_finish = on_finish;
+    return s_instance;
+  }
+
+  ListWatchersRequest() {
+    s_instance = this;
+  }
+
+  MOCK_METHOD0(send, void());
+};
+
+ListWatchersRequest<MockTestImageCtx> *ListWatchersRequest<MockTestImageCtx>::s_instance;
+
+} // namespace image
 } // namespace librbd
 
 // template definitions
@@ -181,6 +209,7 @@ public:
   typedef typename TypeTraits::ContextWQ ContextWQ;
   typedef RemoveRequest<MockTestImageCtx> MockRemoveRequest;
   typedef DetachChildRequest<MockTestImageCtx> MockDetachChildRequest;
+  typedef ListWatchersRequest<MockTestImageCtx> MockListWatchersRequest;
   typedef librbd::operation::TrimRequest<MockTestImageCtx> MockTrimRequest;
   typedef librbd::journal::RemoveRequest<MockTestImageCtx> MockJournalRemoveRequest;
   typedef librbd::mirror::DisableRequest<MockTestImageCtx> MockMirrorDisableRequest;
@@ -235,6 +264,13 @@ public:
     }
   }
 
+  void expect_list_image_watchers(
+    MockTestImageCtx &mock_image_ctx,
+    MockListWatchersRequest &mock_list_watchers_request, int r) {
+    EXPECT_CALL(mock_list_watchers_request, send())
+      .WillOnce(FinishRequest(&mock_list_watchers_request, r, &mock_image_ctx));
+  }
+
   void expect_trim(MockTestImageCtx &mock_image_ctx,
                    MockTrimRequest &mock_trim_request, int r) {
     EXPECT_CALL(mock_trim_request, send())
@@ -260,13 +296,6 @@ public:
       .WillOnce(Return(r));
   }
 
-  void expect_mirror_image_get(MockTestImageCtx &mock_image_ctx, int r) {
-    EXPECT_CALL(get_mock_io_ctx(mock_image_ctx.md_ctx),
-                exec(RBD_MIRRORING, _, StrEq("rbd"), StrEq("mirror_image_get"),
-                     _, _, _))
-      .WillOnce(Return(r));
-  }
-
   void expect_dir_remove_image(librados::IoCtx &ioctx, int r) {
     EXPECT_CALL(get_mock_io_ctx(ioctx),
                 exec(RBD_DIRECTORY, _, StrEq("rbd"), StrEq("dir_remove_image"),
@@ -288,11 +317,13 @@ TEST_F(TestMockImageRemoveRequest, SuccessV1) {
   C_SaferCond ctx;
   librbd::NoOpProgressContext no_op;
   ContextWQ op_work_queue;
+  MockListWatchersRequest mock_list_watchers_request;
   MockTrimRequest mock_trim_request;
   MockJournalRemoveRequest mock_journal_remove_request;
 
   InSequence seq;
   expect_state_open(*m_mock_imctx, 0);
+  expect_list_image_watchers(*m_mock_imctx, mock_list_watchers_request, 0);
   expect_get_group(*m_mock_imctx, 0);
   expect_trim(*m_mock_imctx, mock_trim_request, 0);
   expect_op_work_queue(*m_mock_imctx);
@@ -337,6 +368,7 @@ TEST_F(TestMockImageRemoveRequest, SuccessV2CloneV1) {
   C_SaferCond ctx;
   librbd::NoOpProgressContext no_op;
   ContextWQ op_work_queue;
+  MockListWatchersRequest mock_list_watchers_request;
   MockTrimRequest mock_trim_request;
   MockJournalRemoveRequest mock_journal_remove_request;
   MockMirrorDisableRequest mock_mirror_disable_request;
@@ -347,7 +379,7 @@ TEST_F(TestMockImageRemoveRequest, SuccessV2CloneV1) {
 
   InSequence seq;
   expect_state_open(*m_mock_imctx, 0);
-  expect_mirror_image_get(*m_mock_imctx, 0);
+  expect_list_image_watchers(*m_mock_imctx, mock_list_watchers_request, 0);
   expect_get_group(*m_mock_imctx, 0);
   expect_trim(*m_mock_imctx, mock_trim_request, 0);
   expect_op_work_queue(*m_mock_imctx);
@@ -378,6 +410,7 @@ TEST_F(TestMockImageRemoveRequest, SuccessV2CloneV2) {
   C_SaferCond ctx;
   librbd::NoOpProgressContext no_op;
   ContextWQ op_work_queue;
+  MockListWatchersRequest mock_list_watchers_request;
   MockTrimRequest mock_trim_request;
   MockJournalRemoveRequest mock_journal_remove_request;
   MockMirrorDisableRequest mock_mirror_disable_request;
@@ -388,7 +421,7 @@ TEST_F(TestMockImageRemoveRequest, SuccessV2CloneV2) {
 
   InSequence seq;
   expect_state_open(*m_mock_imctx, 0);
-  expect_mirror_image_get(*m_mock_imctx, 0);
+  expect_list_image_watchers(*m_mock_imctx, mock_list_watchers_request, 0);
   expect_get_group(*m_mock_imctx, 0);
   expect_trim(*m_mock_imctx, mock_trim_request, 0);
   expect_op_work_queue(*m_mock_imctx);
@@ -419,6 +452,7 @@ TEST_F(TestMockImageRemoveRequest, NotExistsV2) {
   C_SaferCond ctx;
   librbd::NoOpProgressContext no_op;
   ContextWQ op_work_queue;
+  MockListWatchersRequest mock_list_watchers_request;
   MockTrimRequest mock_trim_request;
   MockJournalRemoveRequest mock_journal_remove_request;
   MockMirrorDisableRequest mock_mirror_disable_request;
@@ -429,7 +463,7 @@ TEST_F(TestMockImageRemoveRequest, NotExistsV2) {
 
   InSequence seq;
   expect_state_open(*m_mock_imctx, 0);
-  expect_mirror_image_get(*m_mock_imctx, 0);
+  expect_list_image_watchers(*m_mock_imctx, mock_list_watchers_request, 0);
   expect_get_group(*m_mock_imctx, 0);
   expect_trim(*m_mock_imctx, mock_trim_request, 0);
   expect_op_work_queue(*m_mock_imctx);
