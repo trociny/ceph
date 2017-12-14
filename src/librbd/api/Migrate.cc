@@ -14,6 +14,7 @@
 #include "librbd/deep_copy/MetadataCopyRequest.h"
 #include "librbd/deep_copy/SnapshotCopyRequest.h"
 #include "librbd/image/CreateRequest.h"
+#include "librbd/image/ListWatchersRequest.h"
 #include "librbd/image/RemoveRequest.h"
 #include "librbd/internal.h"
 #include "librbd/io/ImageRequestWQ.h"
@@ -78,14 +79,21 @@ int Migrate<I>::migrate(librados::IoCtx& io_ctx, const std::string &image_name,
     }
   } BOOST_SCOPE_EXIT_END;
 
-  std::list<obj_watch_t> watchers;
-  r = image_ctx->md_ctx.list_watchers(image_ctx->header_oid, &watchers);
+  std::list<librbd::WatcherInfo> watchers;
+  C_SaferCond on_list_watchers;
+  auto list_watchers_request = librbd::image::ListWatchersRequest<I>::create(
+      *image_ctx, &watchers, &on_list_watchers);
+  list_watchers_request->send();
+  r = on_list_watchers.wait();
   if (r < 0) {
     lderr(cct) << "failed listing watchers:" << cpp_strerror(r) << dendl;
     return r;
   }
-  if (watchers.size() > 1) {
-    // TODO: filter out mirror watchers
+  auto it = std::find_if(watchers.begin(), watchers.end(),
+                         [] (librbd::WatcherInfo &w) {
+                           return (!w.me && !w.mirroring);
+                         });
+  if (it != watchers.end()) {
     lderr(cct) << "image has watchers - not migrating" << dendl;
     return -EBUSY;
   }
