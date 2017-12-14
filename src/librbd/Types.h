@@ -119,6 +119,23 @@ enum {
   OPEN_FLAG_OLD_FORMAT = 1 << 1,
 };
 
+struct WatcherInfo {
+  std::string addr;
+  int64_t watcher_id = 0;
+  uint64_t cookie = 0;
+  uint32_t timeout_seconds = 0;
+  bool mirroring = false;
+  bool me = false;
+
+  WatcherInfo() {
+  }
+  WatcherInfo(const std::string &addr, int64_t watcher_id, uint64_t cookie,
+              uint32_t timeout_seconds, bool mirroring, bool me)
+    : addr(addr), watcher_id(watcher_id), cookie(cookie),
+      timeout_seconds(timeout_seconds), mirroring(mirroring), me(me) {
+  }
+};
+
 } // namespace librbd
 
 #endif // LIBRBD_TYPES_H
