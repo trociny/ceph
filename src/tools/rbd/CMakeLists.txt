@@ -15,6 +15,7 @@ set(rbd_srcs
   action/Export.cc
   action/Feature.cc
   action/Flatten.cc
+  action/Ggate.cc
   action/Group.cc
   action/ImageMeta.cc
   action/Import.cc
@@ -23,6 +24,7 @@ set(rbd_srcs
   action/Kernel.cc
   action/List.cc
   action/Lock.cc
+  action/Map.cc
   action/MergeDiff.cc
   action/MirrorPool.cc
   action/MirrorImage.cc
@@ -36,9 +38,6 @@ set(rbd_srcs
   action/Status.cc
   action/Trash.cc
   action/Watch.cc)
-if(FREEBSD)
-  list(APPEND rbd_srcs action/Ggate.cc)
-endif()
 
 add_executable(rbd ${rbd_srcs}
   $<TARGET_OBJECTS:common_texttable_obj>)

@@ -180,9 +180,9 @@ static int do_kernel_showmapped(Formatter *f)
   krbd_destroy(krbd);
   return r;
 #else
-  return -1;
+  std::cerr << "rbd: kernel device is not supported" << std::endl;
+  return -EOPNOTSUPP;
 #endif
-
 }
 
 static int get_unsupported_features(librbd::Image &image,
@@ -335,7 +335,8 @@ out:
   krbd_destroy(krbd);
   return r;
 #else
-  return -1;
+  std::cerr << "rbd: kernel device is not supported" << std::endl;
+  return -EOPNOTSUPP;
 #endif
 }
 
@@ -366,9 +367,23 @@ static int do_kernel_unmap(const char *dev, const char *poolname,
   krbd_destroy(krbd);
   return r;
 #else
-  return -1;
+  std::cerr << "rbd: kernel device is not supported" << std::endl;
+  return -EOPNOTSUPP;
 #endif
+}
 
+void get_device_specific_map_options(const std::string &help_suffix,
+                                     po::options_description *options) {
+  options->add_options()
+    ("options,o", po::value<std::string>(),
+     ("map options" + help_suffix).c_str());
+}
+
+void get_device_specific_unmap_options(const std::string &help_suffix,
+                                       po::options_description *options) {
+  options->add_options()
+    ("options,o", po::value<std::string>(),
+     ("unmap options" + help_suffix).c_str());
 }
 
 void get_show_arguments(po::options_description *positional,
@@ -398,9 +413,10 @@ void get_map_arguments(po::options_description *positional,
   at::add_image_or_snap_spec_options(positional, options,
                                      at::ARGUMENT_MODIFIER_NONE);
   options->add_options()
-    ("options,o", po::value<std::string>(), "map options")
     ("read-only", po::bool_switch(), "map read-only")
     ("exclusive", po::bool_switch(), "disable automatic exclusive lock transitions");
+
+  get_device_specific_map_options("", options);
 }
 
 int execute_map(const po::variables_map &vm) {
@@ -467,8 +483,7 @@ void get_unmap_arguments(po::options_description *positional,
   at::add_pool_option(options, at::ARGUMENT_MODIFIER_NONE);
   at::add_image_option(options, at::ARGUMENT_MODIFIER_NONE);
   at::add_snap_option(options, at::ARGUMENT_MODIFIER_NONE);
-  options->add_options()
-    ("options,o", po::value<std::string>(), "unmap options");
+  get_device_specific_unmap_options("", options);
 }
 
 int execute_unmap(const po::variables_map &vm) {
@@ -521,19 +536,6 @@ int execute_unmap(const po::variables_map &vm) {
   }
   return 0;
 }
-
-Shell::SwitchArguments switched_arguments({"read-only", "exclusive"});
-Shell::Action action_show(
-  {"showmapped"}, {}, "Show the rbd images mapped by the kernel.", "",
-  &get_show_arguments, &execute_show);
-
-Shell::Action action_map(
-  {"map"}, {}, "Map image to a block device using the kernel.", "",
-  &get_map_arguments, &execute_map);
-
-Shell::Action action_unmap(
-  {"unmap"}, {}, "Unmap a rbd device that was used by the kernel.", "",
-  &get_unmap_arguments, &execute_unmap);
 
 } // namespace kernel
 } // namespace action

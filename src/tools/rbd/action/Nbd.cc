@@ -104,17 +104,41 @@ int get_image_or_snap_spec(const po::variables_map &vm, std::string *spec) {
   return 0;
 }
 
+void get_device_specific_map_options(const std::string &help_suffix,
+                                     po::options_description *options) {
+  options->add_options()
+    ("device", po::value<std::string>(),
+     ("specify nbd device" + help_suffix).c_str())
+    ("nbds_max", po::value<std::string>(),
+     ("override module param nbds_max" + help_suffix).c_str())
+    ("max_part", po::value<std::string>(),
+     ("override module param max_part" + help_suffix).c_str())
+    ("timeout", po::value<std::string>(),
+     ("set nbd request timeout (seconds)" + help_suffix).c_str());
+}
+
 void get_show_arguments(po::options_description *positional,
                         po::options_description *options)
 { }
 
 int execute_show(const po::variables_map &vm)
 {
+#if defined(__FreeBSD__)
+  std::cerr << "rbd: nbd device is not supported" << std::endl;
+  return -EOPNOTSUPP;
+#endif
   std::vector<const char*> args;
 
   args.push_back("list-mapped");
 
   return call_nbd_cmd(vm, args);
+}
+
+int execute_show_deprecated(const po::variables_map &vm)
+{
+  std::cerr << "rbd: 'nbd list' command is deprecated, "
+            << "use 'showmapped -t nbd' instead" << std::endl;
+  return execute_show(vm);
 }
 
 void get_map_arguments(po::options_description *positional,
@@ -124,15 +148,16 @@ void get_map_arguments(po::options_description *positional,
                                      at::ARGUMENT_MODIFIER_NONE);
   options->add_options()
     ("read-only", po::bool_switch(), "map read-only")
-    ("exclusive", po::bool_switch(), "forbid writes by other clients")
-    ("device", po::value<std::string>(), "specify nbd device")
-    ("nbds_max", po::value<std::string>(), "override module param nbds_max")
-    ("max_part", po::value<std::string>(), "override module param max_part")
-    ("timeout", po::value<std::string>(), "set nbd request timeout (seconds)");
+    ("exclusive", po::bool_switch(), "forbid writes by other clients");
+  get_device_specific_map_options("", options);
 }
 
 int execute_map(const po::variables_map &vm)
 {
+#if defined(__FreeBSD__)
+  std::cerr << "rbd: nbd device is not supported" << std::endl;
+  return -EOPNOTSUPP;
+#endif
   std::vector<const char*> args;
 
   args.push_back("map");
@@ -169,6 +194,13 @@ int execute_map(const po::variables_map &vm)
   return call_nbd_cmd(vm, args);
 }
 
+int execute_map_deprecated(const po::variables_map &vm)
+{
+  std::cerr << "rbd: 'nbd map' command is deprecated, "
+            << "use 'map -t nbd' instead" << std::endl;
+  return execute_map(vm);
+}
+
 void get_unmap_arguments(po::options_description *positional,
                    po::options_description *options)
 {
@@ -183,6 +215,10 @@ void get_unmap_arguments(po::options_description *positional,
 
 int execute_unmap(const po::variables_map &vm)
 {
+#if defined(__FreeBSD__)
+  std::cerr << "rbd: nbd device is not supported" << std::endl;
+  return -EOPNOTSUPP;
+#endif
   std::string device_name = utils::get_positional_argument(vm, 0);
   if (!boost::starts_with(device_name, "/dev/")) {
     device_name.clear();
@@ -211,19 +247,26 @@ int execute_unmap(const po::variables_map &vm)
   return call_nbd_cmd(vm, args);
 }
 
+int execute_unmap_deprecated(const po::variables_map &vm)
+{
+  std::cerr << "rbd: 'nbd unmap' command is deprecated, "
+            << "use 'unmap -t nbd' instead" << std::endl;
+  return execute_unmap(vm);
+}
+
 Shell::SwitchArguments switched_arguments({"read-only"});
 
 Shell::Action action_show(
   {"nbd", "list"}, {"nbd", "ls"}, "List the nbd devices already used.", "",
-  &get_show_arguments, &execute_show);
+  &get_show_arguments, &execute_show_deprecated, false);
 
 Shell::Action action_map(
   {"nbd", "map"}, {}, "Map image to a nbd device.", "",
-  &get_map_arguments, &execute_map);
+  &get_map_arguments, &execute_map_deprecated, false);
 
 Shell::Action action_unmap(
   {"nbd", "unmap"}, {}, "Unmap a nbd device.", "",
-  &get_unmap_arguments, &execute_unmap);
+  &get_unmap_arguments, &execute_unmap_deprecated, false);
 
 } // namespace nbd
 } // namespace action

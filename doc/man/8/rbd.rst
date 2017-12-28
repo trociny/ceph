@@ -343,8 +343,17 @@ Commands
   -l, also show snapshots, and use longer-format output including
   size, parent (if clone), format, etc.
 
-:command:`map` [-o | --options *krbd-options* ] [--read-only] *image-spec* | *snap-spec*
-  Map the specified image to a block device via the rbd kernel module.
+:command:`map` [-t | --device-type *device-type*] [--read-only] [--exclusive] [-o | --options *krbd-options*] [--device *device*] [--nbds_max *nbds_max*] [--max_part *max_part*] [--timeout *timeout*] *image-spec* | *snap-spec*
+  Map the specified image to a block device via the rbd kernel module
+  (default) or other supported device (*nbd* on Linux or *ggate* on
+  FreeBSD).
+
+  The --options argument is *kernel* device type specific.
+
+  The --device argument is *nbd* and *ggate* device type specific.
+
+  The --nbds_max, --max_part, and --timeout argumets are *nbd* device
+  type specific.
 
 :command:`merge-diff` *first-diff-path* *second-diff-path* *merged-diff-path*
   Merge two continuous incremental diffs of an image into one single diff. The
@@ -433,15 +442,6 @@ Commands
 :command:`mv` *src-image-spec* *dest-image-spec*
   Rename an image.  Note: rename across pools is not supported.
 
-:command:`nbd ls`
-  Show the list of used nbd devices via the rbd-nbd tool.
-
-:command:`nbd map` [--device *device-path*] [--read-only] *image-spec* | *snap-spec*
-  Map the specified image to a block device via the rbd-nbd tool.
-
-:command:`nbd unmap` *device-path*
-  Unmap the block device that was mapped via the rbd-nbd tool.
-
 :command:`object-map check` *image-spec* | *snap-spec*
   Verify the object map is correct.
 
@@ -461,8 +461,9 @@ Commands
   Delete an rbd image (including all data blocks). If the image has
   snapshots, this fails and nothing is deleted.
 
-:command:`showmapped`
-  Show the rbd images that are mapped via the rbd kernel module.
+:command:`showmapped` [-t | --device-type *device-type*] [--format plain | json | xml] --pretty-format
+  Show the rbd images that are mapped via the rbd kernel module
+  (default) or other supported device.
 
 :command:`snap create` *snap-spec*
   Create a new snapshot. Requires the snapshot name parameter specified.
@@ -524,8 +525,11 @@ Commands
   you can not removed it unless use force. But an actively in-use by clones 
   or has snapshots can not be removed.
 
-:command:`unmap` [-o | --options *krbd-options* ] *image-spec* | *snap-spec* | *device-path*
-  Unmap the block device that was mapped via the rbd kernel module.
+:command:`unmap` [-t | --device-type *device-type*] [-o | --options *krbd-options*] *image-spec* | *snap-spec* | *device-path*
+  Unmap the block device that was mapped via the rbd kernel module
+  (default) or other supported device.
+
+  The --options argument is *kernel* device type specific.
 
 :command:`watch` *image-spec*
   Watch events on image.

@@ -1,7 +1,3 @@
-Skip test on FreeBSD as it generates different output there.
-
-  $ test "$(uname)" = "FreeBSD" && exit 80 || true
-
   $ rbd --help
   usage: rbd <command> ...
   
@@ -52,8 +48,7 @@ Skip test on FreeBSD as it generates different output there.
       lock add                          Take a lock on an image.
       lock list (lock ls)               Show locks held on an image.
       lock remove (lock rm)             Release a lock on an image.
-      map                               Map image to a block device using the
-                                        kernel.
+      map                               Map an image to a block device.
       merge-diff                        Merge two diff exports together.
       mirror image demote               Demote an image to non-primary for RBD
                                         mirroring.
@@ -78,16 +73,13 @@ Skip test on FreeBSD as it generates different output there.
                                         pool.
       mirror pool status                Show status for all mirrored images in
                                         the pool.
-      nbd list (nbd ls)                 List the nbd devices already used.
-      nbd map                           Map image to a nbd device.
-      nbd unmap                         Unmap a nbd device.
       object-map check                  Verify the object map is correct.
       object-map rebuild                Rebuild an invalid object map.
       pool init                         Initialize pool for use by RBD.
       remove (rm)                       Delete an image.
       rename (mv)                       Rename image within pool.
       resize                            Resize (expand or shrink) image.
-      showmapped                        Show the rbd images mapped by the kernel.
+      showmapped                        Show mapped rbd images.
       snap create (snap add)            Create a snapshot.
       snap limit clear                  Remove snapshot limit.
       snap limit set                    Limit the number of snapshots.
@@ -103,8 +95,7 @@ Skip test on FreeBSD as it generates different output there.
       trash move (trash mv)             Move an image to the trash.
       trash remove (trash rm)           Remove an image from trash.
       trash restore                     Restore an image from trash.
-      unmap                             Unmap a rbd device that was used by the
-                                        kernel.
+      unmap                             Unmap a rbd device.
       watch                             Watch events on image.
   
   Optional arguments:
@@ -890,23 +881,36 @@ Skip test on FreeBSD as it generates different output there.
     --image arg          image name
   
   rbd help map
-  usage: rbd map [--pool <pool>] [--image <image>] [--snap <snap>] 
-                 [--options <options>] [--read-only] [--exclusive] 
+  usage: rbd map [--device-type <device-type>] [--pool <pool>] [--image <image>] 
+                 [--snap <snap>] [--read-only] [--exclusive] 
+                 [--options <options>] [--device <device>] 
+                 [--nbds_max <nbds_max>] [--max_part <max_part>] 
+                 [--timeout <timeout>] [--device <device>] 
                  <image-or-snap-spec> 
   
-  Map image to a block device using the kernel.
+  Map an image to a block device.
   
   Positional arguments
-    <image-or-snap-spec>  image or snapshot specification
-                          (example: [<pool-name>/]<image-name>[@<snap-name>])
+    <image-or-snap-spec>     image or snapshot specification
+                             (example: [<pool-name>/]<image-name>[@<snap-name>])
   
   Optional arguments
-    -p [ --pool ] arg     pool name
-    --image arg           image name
-    --snap arg            snapshot name
-    -o [ --options ] arg  map options
-    --read-only           map read-only
-    --exclusive           disable automatic exclusive lock transitions
+    -t [ --device-type ] arg device type [ggate, kernel (default), nbd]
+    -p [ --pool ] arg        pool name
+    --image arg              image name
+    --snap arg               snapshot name
+    --read-only              map read-only
+    --exclusive              disable automatic exclusive lock transitions
+    -o [ --options ] arg     map options *
+    --device arg             specify nbd device +
+    --nbds_max arg           override module param nbds_max +
+    --max_part arg           override module param max_part +
+    --timeout arg            set nbd request timeout (seconds) +
+    --device arg             specify ggate device #
+  
+  * kernel device specific option
+  + nbd device specific option
+  # ggate device specific option
   
   rbd help merge-diff
   usage: rbd merge-diff [--path <path>] [--no-progress] 
@@ -1139,51 +1143,6 @@ Skip test on FreeBSD as it generates different output there.
     --pretty-format      pretty formatting (json and xml)
     --verbose            be verbose
   
-  rbd help nbd list
-  usage: rbd nbd list 
-  
-  List the nbd devices already used.
-  
-  rbd help nbd map
-  usage: rbd nbd map [--pool <pool>] [--image <image>] [--snap <snap>] 
-                     [--read-only] [--exclusive] [--device <device>] 
-                     [--nbds_max <nbds_max>] [--max_part <max_part>] 
-                     [--timeout <timeout>] 
-                     <image-or-snap-spec> 
-  
-  Map image to a nbd device.
-  
-  Positional arguments
-    <image-or-snap-spec>  image or snapshot specification
-                          (example: [<pool-name>/]<image-name>[@<snap-name>])
-  
-  Optional arguments
-    -p [ --pool ] arg     pool name
-    --image arg           image name
-    --snap arg            snapshot name
-    --read-only           map read-only
-    --exclusive           forbid writes by other clients
-    --device arg          specify nbd device
-    --nbds_max arg        override module param nbds_max
-    --max_part arg        override module param max_part
-    --timeout arg         set nbd request timeout (seconds)
-  
-  rbd help nbd unmap
-  usage: rbd nbd unmap [--pool <pool>] [--image <image>] [--snap <snap>] 
-                       <image-or-snap-or-device-spec> 
-  
-  Unmap a nbd device.
-  
-  Positional arguments
-    <image-or-snap-or-device-spec>  image, snapshot, or device specification
-                                    [<pool-name>/]<image-name>[@<snapshot-name>]
-                                    or <device-path>
-  
-  Optional arguments
-    -p [ --pool ] arg               pool name
-    --image arg                     image name
-    --snap arg                      snapshot name
-  
   rbd help object-map check
   usage: rbd object-map check [--pool <pool>] [--image <image>] [--snap <snap>] 
                               [--no-progress] 
@@ -1285,13 +1244,15 @@ Skip test on FreeBSD as it generates different output there.
     --no-progress        disable progress output
   
   rbd help showmapped
-  usage: rbd showmapped [--format <format>] [--pretty-format] 
+  usage: rbd showmapped [--device-type <device-type>] [--format <format>] 
+                        [--pretty-format] 
   
-  Show the rbd images mapped by the kernel.
+  Show mapped rbd images.
   
   Optional arguments
-    --format arg         output format (plain, json, or xml) [default: plain]
-    --pretty-format      pretty formatting (json and xml)
+    -t [ --device-type ] arg device type [ggate, kernel (default), nbd]
+    --format arg             output format (plain, json, or xml) [default: plain]
+    --pretty-format          pretty formatting (json and xml)
   
   rbd help snap create
   usage: rbd snap create [--pool <pool>] [--image <image>] [--snap <snap>] 
@@ -1545,11 +1506,11 @@ Skip test on FreeBSD as it generates different output there.
     --image arg          image name
   
   rbd help unmap
-  usage: rbd unmap [--pool <pool>] [--image <image>] [--snap <snap>] 
-                   [--options <options>] 
+  usage: rbd unmap [--device-type <device-type>] [--pool <pool>] 
+                   [--image <image>] [--snap <snap>] [--options <options>] 
                    <image-or-snap-or-device-spec> 
   
-  Unmap a rbd device that was used by the kernel.
+  Unmap a rbd device.
   
   Positional arguments
     <image-or-snap-or-device-spec>  image, snapshot, or device specification
@@ -1557,10 +1518,13 @@ Skip test on FreeBSD as it generates different output there.
                                     or <device-path>
   
   Optional arguments
+    -t [ --device-type ] arg        device type [ggate, kernel (default), nbd]
     -p [ --pool ] arg               pool name
     --image arg                     image name
     --snap arg                      snapshot name
-    -o [ --options ] arg            unmap options
+    -o [ --options ] arg            unmap options *
+  
+  * kernel device specific option
   
   rbd help watch
   usage: rbd watch [--pool <pool>] [--image <image>] 
