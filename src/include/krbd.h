@@ -45,6 +45,9 @@ namespace ceph {
   class Formatter;
 }
 
+int krbd_list(struct krbd_ctx *ctx, ceph::Formatter *f);
+
+// deprecated, use krbd_list()
 int krbd_showmapped(struct krbd_ctx *ctx, ceph::Formatter *f);
 
 #endif /* __cplusplus */

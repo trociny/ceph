@@ -627,7 +627,7 @@ static int unmap_image(struct krbd_ctx *ctx, const char *pool,
 }
 
 static bool dump_one_image(Formatter *f, TextTable *tbl,
-                           struct udev_device *dev)
+                           struct udev_device *dev, bool as_object)
 {
   const char *id = udev_device_get_sysname(dev);
   const char *pool = udev_device_get_sysattr_value(dev, "pool");
@@ -639,7 +639,12 @@ static bool dump_one_image(Formatter *f, TextTable *tbl,
     return false;
 
   if (f) {
-    f->open_object_section(id);
+    if (as_object) {
+      f->open_object_section(id);
+    } else {
+      f->open_object_section("device");
+      f->dump_string("id", id);
+    }
     f->dump_string("pool", pool);
     f->dump_string("name", image);
     f->dump_string("snap", snap);
@@ -652,7 +657,8 @@ static bool dump_one_image(Formatter *f, TextTable *tbl,
   return true;
 }
 
-static int do_dump(struct udev *udev, Formatter *f, TextTable *tbl)
+static int do_dump(struct udev *udev, Formatter *f, TextTable *tbl,
+                   bool as_object)
 {
   struct udev_enumerate *enm;
   struct udev_list_entry *l;
@@ -676,7 +682,7 @@ static int do_dump(struct udev *udev, Formatter *f, TextTable *tbl)
 
     dev = udev_device_new_from_syspath(udev, udev_list_entry_get_name(l));
     if (dev) {
-      have_output |= dump_one_image(f, tbl, dev);
+      have_output |= dump_one_image(f, tbl, dev, as_object);
       udev_device_unref(dev);
     }
   }
@@ -687,13 +693,17 @@ out_enm:
   return r;
 }
 
-int dump_images(struct krbd_ctx *ctx, Formatter *f)
+int dump_images(struct krbd_ctx *ctx, Formatter *f, bool as_object = false)
 {
   TextTable tbl;
   int r;
 
   if (f) {
-    f->open_object_section("devices");
+    if (as_object) {
+      f->open_object_section("devices");
+    } else {
+      f->open_array_section("devices");
+    }
   } else {
     tbl.define_column("id", TextTable::LEFT, TextTable::LEFT);
     tbl.define_column("pool", TextTable::LEFT, TextTable::LEFT);
@@ -702,7 +712,7 @@ int dump_images(struct krbd_ctx *ctx, Formatter *f)
     tbl.define_column("device", TextTable::LEFT, TextTable::LEFT);
   }
 
-  r = do_dump(ctx->udev, f, &tbl);
+  r = do_dump(ctx->udev, f, &tbl, as_object);
 
   if (f) {
     f->close_section();
@@ -814,9 +824,14 @@ extern "C" int krbd_unmap_by_spec(struct krbd_ctx *ctx, const char *pool,
   return unmap_image(ctx, pool, image, snap, options);
 }
 
-int krbd_showmapped(struct krbd_ctx *ctx, Formatter *f)
+int krbd_list(struct krbd_ctx *ctx, Formatter *f)
 {
   return dump_images(ctx, f);
+}
+
+int krbd_showmapped(struct krbd_ctx *ctx, Formatter *f)
+{
+  return dump_images(ctx, f, true);
 }
 
 extern "C" int krbd_is_mapped(struct krbd_ctx *ctx, const char *pool,
