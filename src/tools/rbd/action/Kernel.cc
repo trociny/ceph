@@ -165,8 +165,7 @@ static int parse_unmap_options(char *options)
   return 0;
 }
 
-static int do_kernel_showmapped(Formatter *f)
-{
+static int do_kernel_list(Formatter *f, bool deprecated = false) {
 #if defined(WITH_KRBD)
   struct krbd_ctx *krbd;
   int r;
@@ -175,7 +174,11 @@ static int do_kernel_showmapped(Formatter *f)
   if (r < 0)
     return r;
 
-  r = krbd_showmapped(krbd, f);
+  if (deprecated) {
+    r = krbd_showmapped(krbd, f);
+  } else {
+    r = krbd_list(krbd, f);
+  }
 
   krbd_destroy(krbd);
   return r;
@@ -386,12 +389,12 @@ void get_device_specific_unmap_options(const std::string &help_suffix,
      ("unmap options" + help_suffix).c_str());
 }
 
-void get_show_arguments(po::options_description *positional,
+void get_list_arguments(po::options_description *positional,
                         po::options_description *options) {
   at::add_format_options(options);
 }
 
-int execute_show(const po::variables_map &vm) {
+int execute_list(const po::variables_map &vm) {
   at::Format::Formatter formatter;
   int r = utils::get_formatter(vm, &formatter);
   if (r < 0) {
@@ -400,7 +403,26 @@ int execute_show(const po::variables_map &vm) {
 
   utils::init_context();
 
-  r = do_kernel_showmapped(formatter.get());
+  r = do_kernel_list(formatter.get());
+  if (r < 0) {
+    std::cerr << "rbd: device list failed: " << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
+int execute_list_deprecated(const po::variables_map &vm) {
+  std::cerr << "rbd: 'showmapped' command is deprecated, "
+            << "use 'device list' instead" << std::endl;
+  at::Format::Formatter formatter;
+  int r = utils::get_formatter(vm, &formatter);
+  if (r < 0) {
+    return r;
+  }
+
+  utils::init_context();
+
+  r = do_kernel_list(formatter.get(), true);
   if (r < 0) {
     std::cerr << "rbd: showmapped failed: " << cpp_strerror(r) << std::endl;
     return r;
@@ -474,6 +496,12 @@ int execute_map(const po::variables_map &vm) {
   return 0;
 }
 
+int execute_map_deprecated(const po::variables_map &vm) {
+  std::cerr << "rbd: 'map' command is deprecated, use 'device map' instead"
+            << std::endl;
+  return execute_map(vm);
+}
+
 void get_unmap_arguments(po::options_description *positional,
                    po::options_description *options) {
   positional->add_options()
@@ -536,6 +564,25 @@ int execute_unmap(const po::variables_map &vm) {
   }
   return 0;
 }
+
+int execute_unmap_deprecated(const po::variables_map &vm) {
+  std::cerr << "rbd: 'unmap' command is deprecated, use 'device unmap' instead"
+            << std::endl;
+  return execute_unmap(vm);
+}
+
+Shell::SwitchArguments switched_arguments({"read-only", "exclusive"});
+Shell::Action action_show(
+  {"showmapped"}, {}, "Show the rbd images mapped by the kernel.", "",
+  &get_list_arguments, &execute_list_deprecated, false);
+
+Shell::Action action_map(
+  {"map"}, {}, "Map image to a block device using the kernel.", "",
+  &get_map_arguments, &execute_map_deprecated, false);
+
+Shell::Action action_unmap(
+  {"unmap"}, {}, "Unmap a rbd device that was used by the kernel.", "",
+  &get_unmap_arguments, &execute_unmap_deprecated, false);
 
 } // namespace kernel
 } // namespace action

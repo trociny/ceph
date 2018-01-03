@@ -121,7 +121,7 @@ void get_show_arguments(po::options_description *positional,
                         po::options_description *options)
 { }
 
-int execute_show(const po::variables_map &vm)
+int execute_list(const po::variables_map &vm)
 {
 #if defined(__FreeBSD__)
   std::cerr << "rbd: nbd device is not supported" << std::endl;
@@ -134,11 +134,11 @@ int execute_show(const po::variables_map &vm)
   return call_nbd_cmd(vm, args);
 }
 
-int execute_show_deprecated(const po::variables_map &vm)
+int execute_list_deprecated(const po::variables_map &vm)
 {
   std::cerr << "rbd: 'nbd list' command is deprecated, "
-            << "use 'showmapped -t nbd' instead" << std::endl;
-  return execute_show(vm);
+            << "use 'device list -t nbd' instead" << std::endl;
+  return execute_list(vm);
 }
 
 void get_map_arguments(po::options_description *positional,
@@ -197,7 +197,7 @@ int execute_map(const po::variables_map &vm)
 int execute_map_deprecated(const po::variables_map &vm)
 {
   std::cerr << "rbd: 'nbd map' command is deprecated, "
-            << "use 'map -t nbd' instead" << std::endl;
+            << "use 'device map -t nbd' instead" << std::endl;
   return execute_map(vm);
 }
 
@@ -250,7 +250,7 @@ int execute_unmap(const po::variables_map &vm)
 int execute_unmap_deprecated(const po::variables_map &vm)
 {
   std::cerr << "rbd: 'nbd unmap' command is deprecated, "
-            << "use 'unmap -t nbd' instead" << std::endl;
+            << "use 'device unmap -t nbd' instead" << std::endl;
   return execute_unmap(vm);
 }
 
@@ -258,7 +258,7 @@ Shell::SwitchArguments switched_arguments({"read-only"});
 
 Shell::Action action_show(
   {"nbd", "list"}, {"nbd", "ls"}, "List the nbd devices already used.", "",
-  &get_show_arguments, &execute_show_deprecated, false);
+  &get_show_arguments, &execute_list_deprecated, false);
 
 Shell::Action action_map(
   {"nbd", "map"}, {}, "Map image to a nbd device.", "",

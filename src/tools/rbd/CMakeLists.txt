@@ -10,6 +10,7 @@ set(rbd_srcs
   action/Clone.cc
   action/Copy.cc
   action/Create.cc
+  action/Device.cc
   action/Diff.cc
   action/DiskUsage.cc
   action/Export.cc
@@ -24,7 +25,6 @@ set(rbd_srcs
   action/Kernel.cc
   action/List.cc
   action/Lock.cc
-  action/Map.cc
   action/MergeDiff.cc
   action/MirrorPool.cc
   action/MirrorImage.cc

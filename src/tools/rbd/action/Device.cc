@@ -32,22 +32,22 @@ namespace po = boost::program_options;
                                        po::options_description *options);       \
   void get_device_specific_unmap_options(const std::string &help_suffix,        \
                                        po::options_description *options);       \
-  int execute_show(const po::variables_map &vm);                                \
+  int execute_list(const po::variables_map &vm);                                \
   int execute_map(const po::variables_map &vm);                                 \
   int execute_unmap(const po::variables_map &vm);                               \
-}
+  }
 
 DECLARE_DEVICE_FUNCTIONS(ggate);
 DECLARE_DEVICE_FUNCTIONS(kernel);
 DECLARE_DEVICE_FUNCTIONS(nbd);
 
-namespace map {
+namespace device {
 
 namespace {
 
 enum device_type_t {
   DEVICE_TYPE_GGATE,
-  DEVICE_TYPE_KERNEL,
+  DEVICE_TYPE_KRBD,
   DEVICE_TYPE_NBD,
 };
 
@@ -59,8 +59,8 @@ void validate(boost::any& v, const std::vector<std::string>& values,
   const std::string &s = po::validators::get_single_string(values);
   if (s == "ggate") {
     v = boost::any(DEVICE_TYPE_GGATE);
-  } else if (s == "kernel") {
-    v = boost::any(DEVICE_TYPE_KERNEL);
+  } else if (s == "krbd") {
+    v = boost::any(DEVICE_TYPE_KRBD);
   } else if (s == "nbd") {
     v = boost::any(DEVICE_TYPE_NBD);
   } else {
@@ -71,32 +71,32 @@ void validate(boost::any& v, const std::vector<std::string>& values,
 void add_device_type_option(po::options_description *options) {
   options->add_options()
     ("device-type,t", po::value<DeviceType>(),
-     "device type [ggate, kernel (default), nbd]");
+     "device type [ggate, krbd (default), nbd]");
 }
 
 device_type_t get_device_type(const po::variables_map &vm) {
   if (vm.count("device-type")) {
     return vm["device-type"].as<device_type_t>();
   }
-  return DEVICE_TYPE_KERNEL;
+  return DEVICE_TYPE_KRBD;
 }
 
 } // anonymous namespace
 
-void get_show_arguments(po::options_description *positional,
+void get_list_arguments(po::options_description *positional,
                         po::options_description *options) {
   add_device_type_option(options);
   at::add_format_options(options);
 }
 
-int execute_show(const po::variables_map &vm) {
+int execute_list(const po::variables_map &vm) {
   switch (get_device_type(vm)) {
   case DEVICE_TYPE_GGATE:
-    return ggate::execute_show(vm);
-  case DEVICE_TYPE_KERNEL:
-    return kernel::execute_show(vm);
+    return ggate::execute_list(vm);
+  case DEVICE_TYPE_KRBD:
+    return kernel::execute_list(vm);
   case DEVICE_TYPE_NBD:
-    return nbd::execute_show(vm);
+    return nbd::execute_list(vm);
   default:
     assert(0);
     return -EINVAL;
@@ -121,7 +121,7 @@ int execute_map(const po::variables_map &vm) {
   switch (get_device_type(vm)) {
   case DEVICE_TYPE_GGATE:
     return ggate::execute_map(vm);
-  case DEVICE_TYPE_KERNEL:
+  case DEVICE_TYPE_KRBD:
     return kernel::execute_map(vm);
   case DEVICE_TYPE_NBD:
     return nbd::execute_map(vm);
@@ -149,7 +149,7 @@ int execute_unmap(const po::variables_map &vm) {
   switch (get_device_type(vm)) {
   case DEVICE_TYPE_GGATE:
     return ggate::execute_unmap(vm);
-  case DEVICE_TYPE_KERNEL:
+  case DEVICE_TYPE_KRBD:
     return kernel::execute_unmap(vm);
   case DEVICE_TYPE_NBD:
     return nbd::execute_unmap(vm);
@@ -160,22 +160,22 @@ int execute_unmap(const po::variables_map &vm) {
 }
 
 Shell::SwitchArguments switched_arguments({"read-only", "exclusive"});
-Shell::Action action_show(
-  {"showmapped"}, {}, "Show mapped rbd images.", "",
-  &get_show_arguments, &execute_show);
+Shell::Action action_list(
+  {"device", "list"}, {}, "List mapped rbd images.", "",
+  &get_list_arguments, &execute_list);
 
 Shell::Action action_map(
-  {"map"}, {}, "Map an image to a block device.",
-  "* kernel device specific option\n"
+  {"device", "map"}, {}, "Map an image to a block device.",
+  "* krbd device specific option\n"
   "+ nbd device specific option\n"
   "# ggate device specific option\n",
   &get_map_arguments, &execute_map);
 
 Shell::Action action_unmap(
-  {"unmap"}, {}, "Unmap a rbd device.",
+  {"device", "unmap"}, {}, "Unmap a rbd device.",
   "* kernel device specific option\n",
   &get_unmap_arguments, &execute_unmap);
 
-} // namespace map
+} // namespace device
 } // namespace action
 } // namespace rbd

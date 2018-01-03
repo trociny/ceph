@@ -107,7 +107,7 @@ void get_device_specific_map_options(const std::string &help_suffix,
      ("specify ggate device" + help_suffix).c_str());
 }
 
-int execute_show(const po::variables_map &vm)
+int execute_list(const po::variables_map &vm)
 {
 #if !defined(__FreeBSD__)
   std::cerr << "rbd: ggate is only supported on FreeBSD" << std::endl;
