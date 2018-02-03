@@ -19,6 +19,8 @@ namespace operation {
 template <typename ImageCtxT = ImageCtx>
 class DisableFeaturesRequest : public Request<ImageCtxT> {
 public:
+  const uint64_t OP_EVENT_FORBIDDEN_FEATURES = (RBD_FEATURE_MIGRATING);
+
   static DisableFeaturesRequest *create(ImageCtxT &image_ctx, Context *on_finish,
                                         uint64_t journal_op_tid,
                                         uint64_t features, bool force) {
@@ -77,8 +79,8 @@ private:
    *    |/-------------------/
    *    |
    *    v
-   * STATE_APPEND_OP_EVENT (skip if journaling
-   *    |                   disabled)
+   * STATE_APPEND_OP_EVENT (skip if journaling disabled
+   *    |                   or event append forbidden)
    *    v
    * STATE_REMOVE_OBJECT_MAP (skip if not
    *    |                     disabling object map)

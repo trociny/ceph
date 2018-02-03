@@ -66,6 +66,82 @@ void RefreshRequest<I>::send() {
 }
 
 template <typename I>
+void RefreshRequest<I>::send_get_migration_header() {
+  if (m_image_ctx.ignore_migrating) {
+    if (m_image_ctx.old_format) {
+      send_v1_get_snapshots();
+    } else {
+      send_v2_get_metadata();
+    }
+    return;
+  }
+
+  CephContext *cct = m_image_ctx.cct;
+  ldout(cct, 10) << this << " " << __func__ << dendl;
+
+  librados::ObjectReadOperation op;
+  cls_client::migration_get_start(&op);
+
+  using klass = RefreshRequest<I>;
+  librados::AioCompletion *comp =
+    create_rados_callback<klass, &klass::handle_get_migration_header>(this);
+  m_out_bl.clear();
+  m_image_ctx.md_ctx.aio_operate(m_image_ctx.header_oid, comp, &op,
+                                 &m_out_bl);
+  comp->release();
+}
+
+template <typename I>
+Context *RefreshRequest<I>::handle_get_migration_header(int *result) {
+  CephContext *cct = m_image_ctx.cct;
+  ldout(cct, 10) << this << " " << __func__ << ": r=" << *result << dendl;
+
+  if (*result == 0) {
+    bufferlist::iterator it = m_out_bl.begin();
+    *result = cls_client::migration_get_finish(&it, &m_migration_spec);
+  } else if (*result == -ENOENT) {
+    ldout(cct, 5) << this << " " << __func__ << ": no migration header found"
+                  << ", retrying" << dendl;
+    send();
+    return nullptr;
+  }
+
+  if (*result < 0) {
+    lderr(cct) << "failed to retrieve migration header: "
+               << cpp_strerror(*result) << dendl;
+    return m_on_finish;
+  }
+
+  switch(m_migration_spec.type) {
+  case cls::rbd::MIGRATION_TYPE_SRC:
+    if (!m_image_ctx.read_only) {
+      lderr(cct) << "image being migrated" << dendl;
+      *result = -EROFS;
+      return m_on_finish;
+    }
+    ldout(cct, 1) << this << " " << __func__ << ": migrating to: "
+                  << m_migration_spec << dendl;
+    break;
+  case cls::rbd::MIGRATION_TYPE_DST:
+    ldout(cct, 1) << this << " " << __func__ << ": migrating from: "
+                  << m_migration_spec << dendl;
+    break;
+  default:
+    ldout(cct, 1) << this << " " << __func__ << ": migration type "
+                  << m_migration_spec.type << dendl;
+    *result = -EBADMSG;
+    return m_on_finish;
+  }
+
+  if (m_image_ctx.old_format) {
+    send_v1_get_snapshots();
+  } else {
+    send_v2_get_metadata();
+  }
+  return nullptr;
+}
+
+template <typename I>
 void RefreshRequest<I>::send_v1_read_header() {
   CephContext *cct = m_image_ctx.cct;
   ldout(cct, 10) << this << " " << __func__ << dendl;
@@ -89,6 +165,7 @@ Context *RefreshRequest<I>::handle_v1_read_header(int *result) {
   ldout(cct, 10) << this << " " << __func__ << ": " << "r=" << *result << dendl;
 
   rbd_obj_header_ondisk v1_header;
+  bool migrating = false;
   if (*result < 0) {
     return m_on_finish;
   } else if (m_out_bl.length() < sizeof(v1_header)) {
@@ -97,16 +174,27 @@ Context *RefreshRequest<I>::handle_v1_read_header(int *result) {
     return m_on_finish;
   } else if (memcmp(RBD_HEADER_TEXT, m_out_bl.c_str(),
                     sizeof(RBD_HEADER_TEXT)) != 0) {
-    lderr(cct) << "unrecognized v1 header" << dendl;
-    *result = -ENXIO;
-    return m_on_finish;
+    if (memcmp(RBD_MIGRATE_HEADER_TEXT, m_out_bl.c_str(),
+               sizeof(RBD_MIGRATE_HEADER_TEXT)) == 0) {
+      ldout(cct, 1) << this << " " << __func__ << ": migration v1 header detected"
+                    << dendl;
+      migrating = true;
+    } else {
+      lderr(cct) << "unrecognized v1 header" << dendl;
+      *result = -ENXIO;
+      return m_on_finish;
+    }
   }
 
   memcpy(&v1_header, m_out_bl.c_str(), sizeof(v1_header));
   m_order = v1_header.options.order;
   m_size = v1_header.image_size;
   m_object_prefix = v1_header.block_name;
-  send_v1_get_snapshots();
+  if (migrating) {
+    send_get_migration_header();
+  } else {
+    send_v1_get_snapshots();
+  }
   return nullptr;
 }
 
@@ -295,6 +383,12 @@ Context *RefreshRequest<I>::handle_v2_get_mutable_metadata(int *result) {
     ldout(cct, 5) << "ignoring dynamically disabled exclusive lock" << dendl;
     m_features |= RBD_FEATURE_EXCLUSIVE_LOCK;
     m_incomplete_update = true;
+  }
+
+  if ((m_features & RBD_FEATURE_MIGRATING) != 0) {
+    ldout(cct, 1) << "migrating feature set" << dendl;
+    send_get_migration_header();
+    return nullptr;
   }
 
   send_v2_get_metadata();
@@ -1150,7 +1244,9 @@ void RefreshRequest<I>::apply() {
       m_image_ctx.operations_disabled = (
         (m_op_features & ~RBD_OPERATION_FEATURES_ALL) != 0ULL);
       m_image_ctx.group_spec = m_group_spec;
-      m_image_ctx.parent_md = m_parent_md;
+      if (!get_migration_info(&m_image_ctx.parent_md)) {
+        m_image_ctx.parent_md = m_parent_md;
+      }
     }
 
     for (size_t i = 0; i < m_snapc.snaps.size(); ++i) {
@@ -1236,7 +1332,9 @@ void RefreshRequest<I>::apply() {
 template <typename I>
 int RefreshRequest<I>::get_parent_info(uint64_t snap_id,
                                        ParentInfo *parent_md) {
-  if (snap_id == CEPH_NOSNAP) {
+  if (get_migration_info(parent_md)) {
+    return 0;
+  } else if (snap_id == CEPH_NOSNAP) {
     *parent_md = m_parent_md;
     return 0;
   } else {
@@ -1248,6 +1346,23 @@ int RefreshRequest<I>::get_parent_info(uint64_t snap_id,
     }
   }
   return -ENOENT;
+}
+
+template <typename I>
+bool RefreshRequest<I>::get_migration_info(ParentInfo *parent_md) {
+  if (m_migration_spec.type != cls::rbd::MIGRATION_TYPE_DST) {
+    return false;
+  }
+
+  parent_md->spec.pool_id = m_migration_spec.pool_id;
+  parent_md->spec.image_name = m_migration_spec.image_name;
+  parent_md->spec.image_id = m_migration_spec.image_id;
+  parent_md->spec.snap_id = CEPH_NOSNAP;
+  parent_md->spec.migration_source = true;
+  parent_md->spec.snap_seqs = m_migration_spec.snap_seqs;
+  parent_md->overlap = m_migration_spec.overlap;
+
+  return true;
 }
 
 } // namespace image

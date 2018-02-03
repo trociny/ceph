@@ -195,6 +195,16 @@ public:
                                  bool force, ProgressContext &pctx);
   int trash_restore(IoCtx &io_ctx, const char *id, const char *name);
 
+  // Migrate
+  int migrate(IoCtx& io_ctx, const char *image_name, IoCtx& dest_io_ctx,
+              const char *dest_image_name, ImageOptions& opts);
+  int migrate_with_progress(IoCtx& io_ctx, const char *image_name,
+                            IoCtx& dest_io_ctx, const char *dest_image_name,
+                            ImageOptions& opts, ProgressContext &prog_ctx);
+  int migrate_abort(IoCtx& io_ctx, const char *image_name);
+  int migrate_abort_with_progress(IoCtx& io_ctx, const char *image_name,
+                                  ProgressContext &prog_ctx);
+
   // RBD pool mirroring support functions
   int mirror_mode_get(IoCtx& io_ctx, rbd_mirror_mode_t *mirror_mode);
   int mirror_mode_set(IoCtx& io_ctx, rbd_mirror_mode_t mirror_mode);
