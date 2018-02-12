@@ -487,6 +487,7 @@ public:
     expect_stop_replay(mock_journaler);
     expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0);
     expect_committed(mock_journaler, 0);
+    expect_flush_commit_position(mock_journaler);
     expect_start_append(mock_journaler);
     ASSERT_EQ(0, when_open(mock_journal));
   }
@@ -547,6 +548,7 @@ TEST_F(TestMockJournal, StateTransitions) {
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0);
   expect_committed(mock_journaler, 3);
+  expect_flush_commit_position(mock_journaler);
 
   expect_start_append(mock_journaler);
 
@@ -603,6 +605,7 @@ TEST_F(TestMockJournal, ReplayCompleteError) {
   MockJournalReplay mock_journal_replay;
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0, true);
+  expect_flush_commit_position(mock_journaler);
   expect_shut_down_journaler(mock_journaler);
 
   // replay failure should result in replay-restart
@@ -616,6 +619,7 @@ TEST_F(TestMockJournal, ReplayCompleteError) {
 
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0);
+  expect_flush_commit_position(mock_journaler);
   expect_start_append(mock_journaler);
   ASSERT_EQ(0, when_open(mock_journal));
 
@@ -654,6 +658,7 @@ TEST_F(TestMockJournal, FlushReplayError) {
                        std::bind(&invoke_replay_complete, _1, 0));
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, -EINVAL);
+  expect_flush_commit_position(mock_journaler);
   expect_shut_down_journaler(mock_journaler);
 
   // replay flush failure should result in replay-restart
@@ -667,6 +672,7 @@ TEST_F(TestMockJournal, FlushReplayError) {
 
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0);
+  expect_flush_commit_position(mock_journaler);
   expect_start_append(mock_journaler);
   ASSERT_EQ(0, when_open(mock_journal));
 
@@ -703,6 +709,7 @@ TEST_F(TestMockJournal, CorruptEntry) {
   EXPECT_CALL(mock_journal_replay, decode(_, _)).WillOnce(Return(-EBADMSG));
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0, true);
+  expect_flush_commit_position(mock_journaler);
   expect_shut_down_journaler(mock_journaler);
 
   // replay failure should result in replay-restart
@@ -715,6 +722,7 @@ TEST_F(TestMockJournal, CorruptEntry) {
     std::bind(&invoke_replay_complete, _1, 0));
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0);
+  expect_flush_commit_position(mock_journaler);
   expect_start_append(mock_journaler);
   ASSERT_EQ(0, when_open(mock_journal));
 
@@ -748,6 +756,7 @@ TEST_F(TestMockJournal, StopError) {
   MockJournalReplay mock_journal_replay;
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0);
+  expect_flush_commit_position(mock_journaler);
   expect_start_append(mock_journaler);
   ASSERT_EQ(0, when_open(mock_journal));
 
@@ -793,6 +802,7 @@ TEST_F(TestMockJournal, ReplayOnDiskPreFlushError) {
                        mock_replay_entry);
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0, true);
+  expect_flush_commit_position(mock_journaler);
   expect_shut_down_journaler(mock_journaler);
 
   // replay write-to-disk failure should result in replay-restart
@@ -807,6 +817,7 @@ TEST_F(TestMockJournal, ReplayOnDiskPreFlushError) {
 
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0);
+  expect_flush_commit_position(mock_journaler);
   expect_start_append(mock_journaler);
 
   C_SaferCond ctx;
@@ -870,6 +881,7 @@ TEST_F(TestMockJournal, ReplayOnDiskPostFlushError) {
   EXPECT_CALL(mock_journal_replay, shut_down(false, _))
     .WillOnce(DoAll(SaveArg<1>(&on_flush),
                     InvokeWithoutArgs(this, &TestMockJournal::wake_up)));
+  expect_flush_commit_position(mock_journaler);
 
   // replay write-to-disk failure should result in replay-restart
   expect_shut_down_journaler(mock_journaler);
@@ -883,6 +895,7 @@ TEST_F(TestMockJournal, ReplayOnDiskPostFlushError) {
 
   expect_stop_replay(mock_journaler);
   expect_shut_down_replay(mock_image_ctx, mock_journal_replay, 0);
+  expect_flush_commit_position(mock_journaler);
   expect_start_append(mock_journaler);
 
   C_SaferCond ctx;
