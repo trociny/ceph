@@ -413,9 +413,12 @@ void ObjectCopyRequest<I>::compute_diffs() {
     uint64_t end_size;
     bool exists;
     librados::snap_t clone_end_snap_id;
+    bool whole_object;
     calc_snap_set_diff(cct, m_snap_set, start_remote_snap_id,
                        end_remote_snap_id, &diff, &end_size, &exists,
-                       &clone_end_snap_id);
+                       &clone_end_snap_id, &whole_object);
+
+    assert(!whole_object);
 
     dout(20) << ": "
              << "start_remote_snap=" << start_remote_snap_id << ", "
