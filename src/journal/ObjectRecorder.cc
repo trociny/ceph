@@ -366,7 +366,16 @@ void ObjectRecorder::send_appends_aio() {
 
     // safe to hold pointer outside lock until op is submitted
     append_buffers = &m_in_flight_appends[append_tid];
-    append_buffers->swap(m_pending_buffers);
+
+    uint64_t size = 0;
+    for (auto it = m_pending_buffers.begin(); it != m_pending_buffers.end();) {
+      size += it->second.length();
+      append_buffers->push_back(*it);
+      it = m_pending_buffers.erase(it);
+      if (size >= m_soft_max_size) {
+        break;
+      }
+    }
   }
 
   ldout(m_cct, 10) << __func__ << ": " << m_oid << " flushing journal tid="
