@@ -454,6 +454,12 @@ add_executable(ceph_test_snap_mapper
 target_link_libraries(ceph_test_snap_mapper osd global ${BLKID_LIBRARIES} ${UNITTEST_LIBS})
 set_target_properties(ceph_test_snap_mapper PROPERTIES COMPILE_FLAGS ${UNITTEST_CXX_FLAGS})
 
+# ceph_test_snap_mapper_clear_snapset
+add_executable(ceph_test_snap_mapper_clear_snapset
+  test_snap_mapper_clear_snapset.cc
+  )
+target_link_libraries(ceph_test_snap_mapper_clear_snapset osd ceph-common)
+
 add_executable(ceph_test_stress_watch
   test_stress_watch.cc
   )
