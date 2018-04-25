@@ -17,21 +17,9 @@
 #include "test/librbd/mock/MockImageCtx.h"
 #include "test/librbd/test_support.h"
 
-namespace librbd {
-namespace {
-
-struct MockTestImageCtx : public librbd::MockImageCtx {
-  MockTestImageCtx(librbd::ImageCtx &image_ctx)
-    : librbd::MockImageCtx(image_ctx) {
-  }
-};
-
-} // anonymous namespace
-} // namespace librbd
-
 // template definitions
 #include "librbd/deep_copy/ObjectCopyRequest.cc"
-template class librbd::deep_copy::ObjectCopyRequest<librbd::MockTestImageCtx>;
+template class librbd::deep_copy::ObjectCopyRequest<librbd::MockImageCtx>;
 
 bool operator==(const SnapContext& rhs, const SnapContext& lhs) {
   return (rhs.seq == lhs.seq && rhs.snaps == lhs.snaps);
@@ -77,7 +65,7 @@ void scribble(librbd::ImageCtx *image_ctx, int num_ops, size_t max_size,
 
 class TestMockDeepCopyObjectCopyRequest : public TestMockFixture {
 public:
-  typedef ObjectCopyRequest<librbd::MockTestImageCtx> MockObjectCopyRequest;
+  typedef ObjectCopyRequest<librbd::MockImageCtx> MockObjectCopyRequest;
 
   librbd::ImageCtx *m_src_image_ctx;
   librbd::ImageCtx *m_dst_image_ctx;
@@ -133,7 +121,7 @@ public:
       ReturnNew<FunctionContext>([](int) {}));
   }
 
-  void expect_list_snaps(librbd::MockTestImageCtx &mock_image_ctx,
+  void expect_list_snaps(librbd::MockImageCtx &mock_image_ctx,
                          librados::MockTestMemIoCtxImpl &mock_io_ctx,
                          const librados::snap_set_t &snap_set) {
     expect_get_object_name(mock_image_ctx);
@@ -146,7 +134,7 @@ public:
                       Return(0)));
   }
 
-  void expect_list_snaps(librbd::MockTestImageCtx &mock_image_ctx,
+  void expect_list_snaps(librbd::MockImageCtx &mock_image_ctx,
                          librados::MockTestMemIoCtxImpl &mock_io_ctx, int r) {
     expect_get_object_name(mock_image_ctx);
     expect_set_snap_read(mock_io_ctx, CEPH_SNAPDIR);
@@ -160,14 +148,14 @@ public:
     }
   }
 
-  void expect_get_object_name(librbd::MockTestImageCtx &mock_image_ctx) {
+  void expect_get_object_name(librbd::MockImageCtx &mock_image_ctx) {
     EXPECT_CALL(mock_image_ctx, get_object_name(0))
                   .WillOnce(Return(mock_image_ctx.image_ctx->get_object_name(0)));
   }
 
   MockObjectCopyRequest *create_request(
-      librbd::MockTestImageCtx &mock_src_image_ctx,
-      librbd::MockTestImageCtx &mock_dst_image_ctx, Context *on_finish) {
+      librbd::MockImageCtx &mock_src_image_ctx,
+      librbd::MockImageCtx &mock_dst_image_ctx, Context *on_finish) {
     expect_get_object_name(mock_dst_image_ctx);
     return new MockObjectCopyRequest(&mock_src_image_ctx, &mock_dst_image_ctx,
                                      m_snap_map, 0, on_finish);
@@ -240,7 +228,7 @@ public:
     }
   }
 
-  void expect_update_object_map(librbd::MockTestImageCtx &mock_image_ctx,
+  void expect_update_object_map(librbd::MockImageCtx &mock_image_ctx,
                                 librbd::MockObjectMap &mock_object_map,
                                 librados::snap_t snap_id, uint8_t state,
                                 int r) {
@@ -405,8 +393,8 @@ public:
 
 TEST_F(TestMockDeepCopyObjectCopyRequest, DNE) {
   ASSERT_EQ(0, create_snap("copy"));
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);
@@ -435,8 +423,8 @@ TEST_F(TestMockDeepCopyObjectCopyRequest, Write) {
   scribble(m_src_image_ctx, 10, 102400, &one);
 
   ASSERT_EQ(0, create_snap("copy"));
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);
@@ -480,8 +468,8 @@ TEST_F(TestMockDeepCopyObjectCopyRequest, ReadMissingStaleSnapSet) {
   ASSERT_EQ(0, create_snap("three"));
 
   ASSERT_EQ(0, create_snap("copy"));
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);
@@ -545,8 +533,8 @@ TEST_F(TestMockDeepCopyObjectCopyRequest, ReadMissingUpToDateSnapMap) {
   scribble(m_src_image_ctx, 10, 102400, &one);
 
   ASSERT_EQ(0, create_snap("copy"));
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);
@@ -579,8 +567,8 @@ TEST_F(TestMockDeepCopyObjectCopyRequest, ReadError) {
   scribble(m_src_image_ctx, 10, 102400, &one);
 
   ASSERT_EQ(0, create_snap("copy"));
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);
@@ -612,8 +600,8 @@ TEST_F(TestMockDeepCopyObjectCopyRequest, WriteError) {
   scribble(m_src_image_ctx, 10, 102400, &one);
 
   ASSERT_EQ(0, create_snap("copy"));
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);
@@ -660,8 +648,8 @@ TEST_F(TestMockDeepCopyObjectCopyRequest, WriteSnaps) {
   }
 
   ASSERT_EQ(0, create_snap("copy"));
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);
@@ -721,8 +709,8 @@ TEST_F(TestMockDeepCopyObjectCopyRequest, Trim) {
     trim_offset, one.range_end() - trim_offset, m_src_image_ctx->skip_partial_discard));
   ASSERT_EQ(0, create_snap("copy"));
 
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);
@@ -772,8 +760,8 @@ TEST_F(TestMockDeepCopyObjectCopyRequest, Remove) {
   uint64_t object_size = 1 << m_src_image_ctx->order;
   ASSERT_LE(0, m_src_image_ctx->io_work_queue->discard(0, object_size, m_src_image_ctx->skip_partial_discard));
   ASSERT_EQ(0, create_snap("copy"));
-  librbd::MockTestImageCtx mock_src_image_ctx(*m_src_image_ctx);
-  librbd::MockTestImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
+  librbd::MockImageCtx mock_src_image_ctx(*m_src_image_ctx);
+  librbd::MockImageCtx mock_dst_image_ctx(*m_dst_image_ctx);
 
   librbd::MockExclusiveLock mock_exclusive_lock;
   prepare_exclusive_lock(mock_dst_image_ctx, mock_exclusive_lock);

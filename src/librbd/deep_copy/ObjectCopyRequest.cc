@@ -58,7 +58,43 @@ ObjectCopyRequest<I>::ObjectCopyRequest(I *src_image_ctx, I *dst_image_ctx,
 
 template <typename I>
 void ObjectCopyRequest<I>::send() {
+  set_parent();
   send_list_snaps();
+}
+
+template <typename I>
+void ObjectCopyRequest<I>::set_parent() {
+  assert(m_parent_child_snap_id == CEPH_NOSNAP);
+  assert(m_parent == nullptr);
+
+  RWLock::RLocker snap_locker(m_src_image_ctx->snap_lock);
+  RWLock::RLocker parent_locker(m_src_image_ctx->parent_lock);
+
+  if (m_src_image_ctx->parent != nullptr) {
+    auto snap_id = m_snap_map.begin()->first;
+    auto parent_snap_id = m_src_image_ctx->get_parent_snap_id(snap_id);
+    if (parent_snap_id == m_src_image_ctx->parent->snap_id) {
+      m_parent_child_snap_id = snap_id;
+      m_parent = m_src_image_ctx->parent;
+    } else {
+      ldout(m_cct, 20) << "start snap " << snap_id << " has no parent" << dendl;
+    }
+  }
+  ldout(m_cct, 20) << "parent=" << m_parent << dendl;
+}
+
+template <typename I>
+bool ObjectCopyRequest<I>::update_parent() {
+  assert(m_parent != nullptr);
+
+  RWLock::RLocker snap_locker(m_parent->snap_lock);
+  RWLock::RLocker parent_locker(m_parent->parent_lock);
+  m_parent_child_snap_id = m_parent->snap_id;
+  m_parent = m_parent->parent;
+
+  ldout(m_cct, 20) << "parent=" << m_parent << dendl;
+
+  return m_parent != nullptr;
 }
 
 template <typename I>
@@ -144,7 +180,8 @@ void ObjectCopyRequest<I>::send_read_object() {
       return;
     }
 
-    send_write_object();
+    compute_parent_object_extents();
+    send_read_parent_object();
     return;
   }
 
@@ -218,6 +255,99 @@ void ObjectCopyRequest<I>::handle_read_object(int r) {
   m_read_snaps.erase(m_read_snaps.begin());
 
   send_read_object();
+}
+
+template <typename I>
+void ObjectCopyRequest<I>::send_read_parent_object() {
+  if (m_parent_objects.empty()) {
+    if (!m_parent_object_extents.empty()) {
+      // Some reads returned -ENOENT. Try the parent of this parent.
+      m_flatten = true;
+      recompute_src_object_extents();
+      if (update_parent()) {
+        compute_parent_object_extents();
+        send_read_parent_object();
+      } else {
+        finish(0);
+      }
+    } else if (!m_write_ops.empty()) {
+      send_write_object();
+    } else {
+      finish(0);
+    }
+    return;
+  }
+
+  m_src_ono = m_parent_objects.begin()->first;
+  assert(!m_parent_objects[m_src_ono].empty());
+  m_parent_ono = *m_parent_objects[m_src_ono].begin();
+  m_parent_objects[m_src_ono].erase(m_parent_ono);
+  if (m_parent_objects[m_src_ono].empty()) {
+    m_parent_objects.erase(m_src_ono);
+  }
+
+  compute_parent_read_ops();
+
+  if (m_parent_read_ops.empty()) {
+    send_read_parent_object();
+    return;
+  }
+
+  librados::ObjectReadOperation op;
+
+  for (auto &copy_op : m_parent_read_ops) {
+    ldout(m_cct, 20) << "read op: " << copy_op.src_offset << "~"
+                     << copy_op.length << dendl;
+    op.sparse_read(copy_op.src_offset, copy_op.length, &copy_op.src_extent_map,
+                   &copy_op.out_bl, nullptr);
+    op.set_op_flags2(LIBRADOS_OP_FLAG_FADVISE_SEQUENTIAL |
+                     LIBRADOS_OP_FLAG_FADVISE_NOCACHE);
+  }
+
+  auto ctx = create_context_callback<
+    ObjectCopyRequest<I>,
+    &ObjectCopyRequest<I>::handle_read_parent_object>(this);
+  auto comp = create_rados_callback(ctx);
+
+  assert(m_parent != nullptr);
+
+  std::string parent_oid = m_parent->get_object_name(m_parent_ono);
+  ldout(m_cct, 20) << "read " << parent_oid << dendl;
+
+  int r = m_parent->data_ctx.aio_operate(parent_oid, comp, &op, nullptr);
+  assert(r == 0);
+  comp->release();
+}
+
+template <typename I>
+void ObjectCopyRequest<I>::handle_read_parent_object(int r) {
+  ldout(m_cct, 20) << "r=" << r << dendl;
+
+  if (r < 0 && r != -ENOENT) {
+    lderr(m_cct) << "failed to read from parent object: " << cpp_strerror(r)
+                 << dendl;
+    finish(r);
+    return;
+  }
+
+  if (r != -ENOENT) {
+    m_read_ops = {};
+    m_zero_interval = {};
+    auto &copy_ops = m_read_ops[{0, 0}];
+    copy_ops.splice(copy_ops.begin(), m_parent_read_ops);
+    bool fast_diff = m_dst_image_ctx->test_features(RBD_FEATURE_FAST_DIFF);
+    for (auto it : m_snap_map) {
+      if (m_dst_object_state.find(it.first) != m_dst_object_state.end()) {
+        break;
+      }
+      m_dst_object_state[it.first] = fast_diff ? OBJECT_EXISTS_CLEAN :
+        OBJECT_EXISTS;
+    }
+    merge_write_ops();
+    m_parent_object_extents.erase(m_src_ono);
+  }
+
+  send_read_parent_object();
 }
 
 template <typename I>
@@ -409,10 +539,10 @@ Context *ObjectCopyRequest<I>::start_lock_op(RWLock &owner_lock) {
 }
 
 template <typename I>
-uint64_t ObjectCopyRequest<I>::src_to_dst_object_offset(uint64_t objectno,
-                                                        uint64_t offset) {
+uint64_t ObjectCopyRequest<I>::src_to_dst_object_offset(
+    file_layout_t& src_layout, uint64_t objectno, uint64_t offset) {
   std::vector<std::pair<uint64_t, uint64_t>> image_extents;
-  Striper::extent_to_file(m_cct, &m_src_image_ctx->layout, objectno, offset, 1,
+  Striper::extent_to_file(m_cct, &src_layout, objectno, offset, 1,
                           image_extents);
   assert(image_extents.size() == 1);
   auto dst_object_offset = image_extents.begin()->first;
@@ -431,17 +561,25 @@ uint64_t ObjectCopyRequest<I>::src_to_dst_object_offset(uint64_t objectno,
 
 template <typename I>
 void ObjectCopyRequest<I>::compute_src_object_extents() {
+  compute_src_object_extents(m_src_image_ctx, 0,
+                             m_dst_image_ctx->layout.object_size, false);
+}
+
+template <typename I>
+void ObjectCopyRequest<I>::compute_src_object_extents(
+  I *src_image_ctx, uint64_t dst_object_offset, uint64_t length,
+  bool read_from_parent) {
   std::vector<std::pair<uint64_t, uint64_t>> image_extents;
   Striper::extent_to_file(m_cct, &m_dst_image_ctx->layout, m_dst_object_number,
-                          0, m_dst_image_ctx->layout.object_size, image_extents);
+                          dst_object_offset, length, image_extents);
 
   size_t total = 0;
   for (auto &e : image_extents) {
     std::map<object_t, std::vector<ObjectExtent>> src_object_extents;
-    Striper::file_to_extents(m_cct, m_src_image_ctx->format_string,
-                             &m_src_image_ctx->layout, e.first, e.second, 0,
+    Striper::file_to_extents(m_cct, src_image_ctx->format_string,
+                             &src_image_ctx->layout, e.first, e.second, 0,
                              src_object_extents);
-    auto stripe_unit = std::min(m_src_image_ctx->layout.stripe_unit,
+    auto stripe_unit = std::min(src_image_ctx->layout.stripe_unit,
                                 m_dst_image_ctx->layout.stripe_unit);
     for (auto &p : src_object_extents) {
       for (auto &s : p.second) {
@@ -449,9 +587,10 @@ void ObjectCopyRequest<I>::compute_src_object_extents() {
         total += s.length;
         while (s.length > 0) {
           assert(s.length >= stripe_unit);
-          auto dst_object_offset = src_to_dst_object_offset(s.objectno, s.offset);
-          m_src_object_extents[dst_object_offset] = {s.objectno, s.offset,
-                                                     stripe_unit};
+          auto dst_object_offset = src_to_dst_object_offset(
+              src_image_ctx->layout, s.objectno, s.offset);
+          m_src_object_extents[dst_object_offset] =
+              {s.objectno, s.offset, stripe_unit, read_from_parent};
           s.offset += stripe_unit;
           s.length -= stripe_unit;
         }
@@ -459,9 +598,11 @@ void ObjectCopyRequest<I>::compute_src_object_extents() {
     }
   }
 
-  assert(total == m_dst_image_ctx->layout.object_size);
+  assert(total == length);
 
-  ldout(m_cct, 20) << m_src_object_extents.size() << " src extents" << dendl;
+  ldout(m_cct, 20) << "dst extent " << dst_object_offset << "~" << length
+                   << " -> " << m_src_object_extents.size() << " src extents"
+                   << dendl;
 }
 
 template <typename I>
@@ -582,6 +723,16 @@ void ObjectCopyRequest<I>::compute_read_ops() {
       }
     }
 
+    if (m_parent && start_src_snap_id == 0 &&
+        (!exists || m_read_whole_object /* XXXMG */)) {
+      for (auto &it : m_src_object_extents) {
+        auto &e = it.second;
+        if (e.object_no == m_src_ono) {
+          e.read_from_parent = true;
+        }
+      }
+    }
+
     prev_end_size = end_size;
     prev_exists = exists;
     start_src_snap_id = end_src_snap_id;
@@ -589,6 +740,159 @@ void ObjectCopyRequest<I>::compute_read_ops() {
 
   for (auto &it : m_read_ops) {
     m_read_snaps.push_back(it.first);
+  }
+}
+
+template <typename I>
+bool ObjectCopyRequest<I>::is_copy_from_parent_required() {
+  if (!m_parent) {
+    ldout(m_cct, 20) << "no parent => false" << dendl;
+    return false;
+  }
+
+  size_t read_from_parent_count = 0;
+  for (auto &it : m_src_object_extents) {
+    if (it.second.read_from_parent) {
+      read_from_parent_count++;
+    }
+  }
+
+  if (read_from_parent_count == 0) {
+    ldout(m_cct, 20) << "no extents need read from parent => false" << dendl;
+    return false;
+  }
+
+  if (read_from_parent_count == m_src_object_extents.size() && !m_flatten) {
+    ldout(m_cct, 20) << "reading all extents skipped when no flatten => false"
+                     << dendl;
+    return false;
+  }
+
+  ldout(m_cct, 20) << "true" << dendl;
+  return true;
+}
+
+template <typename I>
+void ObjectCopyRequest<I>::compute_parent_object_extents() {
+  m_parent_objects = {};
+  m_parent_object_extents = {};
+
+  if (!is_copy_from_parent_required()) {
+    return;
+  }
+
+  assert(m_parent != nullptr);
+
+  auto src_image_ctx = m_parent->child;
+  assert(src_image_ctx->parent == m_parent);
+
+  RWLock::RLocker snap_locker(src_image_ctx->snap_lock);
+  RWLock::RLocker parent_locker(src_image_ctx->parent_lock);
+
+  auto parent_snap_id =
+      src_image_ctx->get_parent_snap_id(m_parent_child_snap_id);
+  assert(parent_snap_id == src_image_ctx->parent->snap_id);
+
+  uint64_t parent_overlap;
+  int r = src_image_ctx->get_parent_overlap(m_parent_child_snap_id,
+                                            &parent_overlap);
+  if (r < 0) {
+    ldout(m_cct, 5) << "failed getting parent overlap for snap_id: "
+                    << m_parent_child_snap_id << ": " << cpp_strerror(r)
+                    << dendl;
+    return;
+  }
+  if (parent_overlap == 0) {
+    ldout(m_cct, 20) << "no parent overlap" << dendl;
+    return;
+  }
+
+  for (auto &it : m_src_object_extents) {
+    auto &e = it.second;
+    auto src_ono = e.object_no;
+
+    if (!e.read_from_parent) {
+      continue;
+    }
+
+    std::vector<pair<uint64_t, uint64_t>> parent_extents;
+    Striper::extent_to_file(m_cct, &src_image_ctx->layout, src_ono,
+                            e.offset, e.length, parent_extents);
+
+    uint64_t object_overlap = src_image_ctx->prune_parent_extents(
+        parent_extents, parent_overlap);
+
+    if (object_overlap == 0) {
+      continue;
+    }
+
+    ldout(m_cct, 20) << "image extent " << e.offset << "~" << e.length
+                     << " overlap " << parent_overlap << " parent extents "
+                     << parent_extents << dendl;
+
+    for (auto &e : parent_extents) {
+      std::map<object_t, std::vector<ObjectExtent>> parent_object_extents;
+      Striper::file_to_extents(m_cct, src_image_ctx->parent->format_string,
+                               &src_image_ctx->parent->layout, e.first,
+                               e.second, 0, parent_object_extents);
+      auto stripe_unit = std::min(src_image_ctx->parent->layout.stripe_unit,
+                                  m_dst_image_ctx->layout.stripe_unit);
+      for (auto &p : parent_object_extents) {
+        for (auto &s : p.second) {
+          m_parent_objects[src_ono].insert(s.objectno);
+          while (s.length > 0) {
+            assert(s.length >= stripe_unit);
+            auto dst_object_offset = src_to_dst_object_offset(
+                src_image_ctx->parent->layout, s.objectno, s.offset);
+            m_parent_object_extents[src_ono][dst_object_offset] =
+                {s.objectno, s.offset, stripe_unit, true};
+            s.offset += stripe_unit;
+            s.length -= stripe_unit;
+          }
+        }
+      }
+    }
+  }
+}
+
+template <typename I>
+void ObjectCopyRequest<I>::recompute_src_object_extents() {
+  m_src_object_extents = {};
+
+  if (!m_parent) {
+    return;
+  }
+
+  for (auto &iter : m_parent_object_extents) {
+    auto &parent_object_extents = iter.second;
+    for (auto &it : parent_object_extents) {
+      auto dst_object_offset = it.first;
+      auto length = it.second.length;
+      compute_src_object_extents(m_parent, dst_object_offset, length, true);
+    }
+  }
+}
+
+template <typename I>
+void ObjectCopyRequest<I>::compute_parent_read_ops() {
+  m_parent_read_ops = {};
+
+  RWLock::RLocker snap_locker(m_src_image_ctx->snap_lock);
+  RWLock::RLocker parent_locker(m_src_image_ctx->parent_lock);
+
+  for (auto &it : m_parent_object_extents[m_src_ono]) {
+    auto dst_object_offset = it.first;
+    auto &e = it.second;
+
+    if (e.object_no != m_parent_ono) {
+      continue;
+    }
+
+    ldout(m_cct, 20) << "parent_object_extent: " << e.offset << "~" << e.length
+                     << ", dst_object_offset=" << dst_object_offset << dendl;
+
+    m_parent_read_ops.emplace_back(COPY_OP_TYPE_WRITE, e.offset,
+                                   dst_object_offset, e.length);
   }
 }
 

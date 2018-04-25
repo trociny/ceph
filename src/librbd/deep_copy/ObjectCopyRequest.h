@@ -64,6 +64,11 @@ private:
    *    |     \----------------------/
    *    |
    *    |     /-----------\
+   *    |     |           | (repeat for each parent object)
+   *    v     v           |
+   * READ_PARENT ---------/
+   *    |
+   *    |     /-----------\
    *    |     |           | (repeat for each snapshot)
    *    v     v           |
    * WRITE_OBJECT --------/
@@ -83,11 +88,14 @@ private:
     uint64_t object_no = 0;
     uint64_t offset = 0;
     uint64_t length = 0;
+    bool read_from_parent = false;
 
     SrcObjectExtent() {
     }
-    SrcObjectExtent(uint64_t object_no, uint64_t offset, uint64_t length)
-      : object_no(object_no), offset(offset), length(length) {
+    SrcObjectExtent(uint64_t object_no, uint64_t offset, uint64_t length,
+                    bool read_from_parent)
+      : object_no(object_no), offset(offset), length(length),
+        read_from_parent(read_from_parent) {
     }
   };
 
@@ -129,6 +137,7 @@ private:
   CephContext *m_cct;
   const SnapMap &m_snap_map;
   uint64_t m_dst_object_number;
+  bool m_flatten = false;
   Context *m_on_finish;
 
   decltype(m_src_image_ctx->data_ctx) m_src_io_ctx;
@@ -152,8 +161,21 @@ private:
   std::map<librados::snap_t, interval_set<uint64_t>> m_dst_zero_interval;
   std::map<librados::snap_t, uint8_t> m_dst_object_state;
 
+  librados::snap_t m_parent_child_snap_id = CEPH_NOSNAP;
+  ImageCtxT *m_parent = nullptr;
+  std::map<uint64_t, std::set<uint64_t>> m_parent_objects;
+  std::map<uint64_t, SrcObjectExtents> m_parent_object_extents;
+  uint64_t m_parent_ono;
+  CopyOps m_parent_read_ops;
+
+  void set_parent();
+  bool update_parent();
+
   void send_list_snaps();
   void handle_list_snaps(int r);
+
+  void send_read_parent_object();
+  void handle_read_parent_object(int r);
 
   void send_read_object();
   void handle_read_object(int r);
@@ -166,12 +188,21 @@ private:
 
   Context *start_lock_op(RWLock &owner_lock);
 
-  uint64_t src_to_dst_object_offset(uint64_t objectno, uint64_t offset);
+  uint64_t src_to_dst_object_offset(file_layout_t& src_layout,
+                                    uint64_t objectno, uint64_t offset);
 
   void compute_src_object_extents();
+  void compute_src_object_extents(ImageCtxT *src_image_ctx,
+                                  uint64_t dst_object_offset, uint64_t length,
+                                  bool read_from_parent);
   void compute_read_ops();
   void merge_write_ops();
   void compute_zero_ops();
+
+  bool is_copy_from_parent_required();
+  void recompute_src_object_extents();
+  void compute_parent_object_extents();
+  void compute_parent_read_ops();
 
   void finish(int r);
 };
