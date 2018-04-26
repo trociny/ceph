@@ -40,10 +40,11 @@ template <typename I>
 ObjectCopyRequest<I>::ObjectCopyRequest(I *src_image_ctx, I *dst_image_ctx,
                                         const SnapMap &snap_map,
                                         uint64_t dst_object_number,
-                                        Context *on_finish)
+                                        bool flatten, Context *on_finish)
   : m_src_image_ctx(src_image_ctx), m_dst_image_ctx(dst_image_ctx),
     m_cct(dst_image_ctx->cct), m_snap_map(snap_map),
-    m_dst_object_number(dst_object_number), m_on_finish(on_finish) {
+    m_dst_object_number(dst_object_number), m_flatten(flatten),
+    m_on_finish(on_finish) {
   assert(!m_snap_map.empty());
 
   m_src_io_ctx.dup(m_src_image_ctx->data_ctx);
@@ -174,7 +175,7 @@ void ObjectCopyRequest<I>::send_read_object() {
 
     compute_zero_ops();
 
-    if (m_write_ops.empty()) {
+    if (m_write_ops.empty() && !m_flatten) {
       // nothing to copy
       finish(0);
       return;
