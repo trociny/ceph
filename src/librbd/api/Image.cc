@@ -10,6 +10,7 @@
 #include "librbd/ExclusiveLock.h"
 #include "librbd/ImageCtx.h"
 #include "librbd/ImageState.h"
+#include "librbd/Operations.h"
 #include "librbd/Utils.h"
 #include "librbd/image/CloneRequest.h"
 #include "librbd/internal.h"
@@ -226,6 +227,7 @@ int Image<I>::deep_copy(I *src, librados::IoCtx& dest_md_ctx,
   }
 
   int r;
+  uint64_t dst_size = src_size;
   if (parent_spec.pool_id == -1) {
     r = create(dest_md_ctx, destname, "", src_size, opts, "", "", false);
   } else {
@@ -265,6 +267,12 @@ int Image<I>::deep_copy(I *src, librados::IoCtx& dest_md_ctx,
       "", "", src->op_work_queue, &ctx);
     req->send();
     r = ctx.wait();
+
+    {
+      RWLock::RLocker snap_locker(src_parent_image_ctx->snap_lock);
+      dst_size = src_parent_image_ctx->get_image_size(parent_spec.snap_id);
+    }
+
     int close_r = src_parent_image_ctx->state->close();
     if (r == 0 && close_r < 0) {
       r = close_r;
@@ -302,6 +310,11 @@ int Image<I>::deep_copy(I *src, librados::IoCtx& dest_md_ctx,
                << dendl;
     dest->state->close();
     return r;
+  }
+
+  if (dst_size != src_size) {
+    NoOpProgressContext no_op;
+    r = dest->operations->resize(src_size, true, no_op);
   }
 
   r = deep_copy(src, dest, flatten > 0, prog_ctx);
