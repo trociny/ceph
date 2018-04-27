@@ -965,7 +965,7 @@ void ObjectCopyRequest<I>::compute_zero_ops() {
       if (z.get_start() + z.get_len() >= end_size) {
         // zero interval at the object end
         if (z.get_start() < prev_end_size) {
-          if (z.get_start() == 0) {
+          if (z.get_start() == 0 && (m_src_image_ctx->parent == nullptr || m_flatten /* XXXMG */)) {
             m_write_ops[src_snap_seq]
               .emplace_back(COPY_OP_TYPE_REMOVE, 0, 0, 0);
             ldout(m_cct, 20) << "COPY_OP_TYPE_REMOVE" << dendl;
@@ -986,7 +986,7 @@ void ObjectCopyRequest<I>::compute_zero_ops() {
     }
     ldout(m_cct, 20) << "src_snap_seq=" << src_snap_seq << ", end_size="
                      << end_size << dendl;
-    if (end_size > 0) {
+    if (end_size > 0 || (prev_end_size > 0 && m_src_image_ctx->parent != nullptr && !m_flatten /* && the first snap after parent XXXMG */)) {
       m_dst_object_state[src_snap_seq] = OBJECT_EXISTS;
       if (fast_diff && end_size == prev_end_size &&
           m_write_ops[src_snap_seq].empty()) {
