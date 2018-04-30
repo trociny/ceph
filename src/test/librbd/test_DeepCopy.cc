@@ -176,6 +176,32 @@ struct TestDeepCopy : public TestFixture {
               m_src_ictx->io_work_queue->discard(0, len, false));
   }
 
+  void test_clone_discard() {
+    bufferlist bl;
+    bl.append(std::string(100, '1'));
+    ASSERT_EQ(static_cast<ssize_t>(bl.length()),
+              m_src_ictx->io_work_queue->write(0, bl.length(), bufferlist{bl},
+                                               0));
+    ASSERT_EQ(0, m_src_ictx->io_work_queue->flush());
+
+    ASSERT_EQ(0, snap_create(*m_src_ictx, "snap"));
+    ASSERT_EQ(0, snap_protect(*m_src_ictx, "snap"));
+
+    std::string clone_name = get_temp_image_name();
+    int order = m_src_ictx->order;
+    uint64_t features;
+    ASSERT_EQ(0, librbd::get_features(m_src_ictx, &features));
+    ASSERT_EQ(0, librbd::clone(m_ioctx, m_src_ictx->name.c_str(), "snap",
+                               m_ioctx, clone_name.c_str(), features, &order, 0,
+                               0));
+    close_image(m_src_ictx);
+    ASSERT_EQ(0, open_image(clone_name, &m_src_ictx));
+
+    size_t len = (1 << m_src_ictx->order) * 2;
+    ASSERT_EQ(static_cast<ssize_t>(len),
+              m_src_ictx->io_work_queue->discard(0, len, false));
+  }
+
   void test_clone() {
     bufferlist bl;
     bl.append(std::string(((1 << m_src_ictx->order) * 2) + 1, '1'));
@@ -327,6 +353,11 @@ TEST_F(TestDeepCopy, Snaps)
 TEST_F(TestDeepCopy, SnapDiscard)
 {
   test_snap_discard();
+}
+
+TEST_F(TestDeepCopy, CloneDiscard)
+{
+  test_clone_discard();
 }
 
 TEST_F(TestDeepCopy, Clone)
