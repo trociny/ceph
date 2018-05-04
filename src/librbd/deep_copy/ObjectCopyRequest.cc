@@ -92,7 +92,10 @@ void ObjectCopyRequest<I>::handle_list_snaps(int r) {
 
   ldout(m_cct, 20) << "r=" << r << dendl;
 
-  if (r == -ENOENT) {
+  if (r == 0) {
+    m_exists = true;
+  } else if (r == -ENOENT) {
+    m_exists = false;
     r = 0;
   }
 
@@ -269,6 +272,9 @@ void ObjectCopyRequest<I>::send_write_object() {
       break;
     case COPY_OP_TYPE_TRUNC:
       ldout(m_cct, 20) << "trunc op: " << copy_op.dst_offset << dendl;
+      if (copy_op.dst_offset == 0) {
+        op.create(false);
+      }
       op.truncate(copy_op.dst_offset);
       break;
     case COPY_OP_TYPE_REMOVE:
@@ -484,9 +490,36 @@ void ObjectCopyRequest<I>::compute_read_ops() {
     uint64_t end_size;
     bool exists;
     librados::snap_t clone_end_snap_id;
-    calc_snap_set_diff(m_cct, m_snap_set, start_src_snap_id,
-                       end_src_snap_id, &diff, &end_size, &exists,
-                       &clone_end_snap_id, &m_read_whole_object);
+
+    if (end_src_snap_id == m_snap_map.begin()->first) {
+      if (!m_exists) {
+        m_zero_interval[end_src_snap_id] = {};
+        for (auto &it : m_src_object_extents) {
+          auto &e = it.second;
+          if (e.object_no == m_src_ono) {
+            m_zero_interval[end_src_snap_id].insert(it.first, e.length);
+          }
+        }
+        break;
+      }
+
+      m_dst_object_state[end_src_snap_id] = OBJECT_EXISTS;
+    }
+
+    if (m_snap_set.clones.empty() &&
+        end_src_snap_id == m_snap_map.begin()->first) {
+      ldout(m_cct, 20) << "no clones for existing objects" << dendl;
+      diff.insert(0, m_src_image_ctx->layout.object_size);
+      exists = true;
+      end_size = 0;
+      prev_end_size = m_src_image_ctx->layout.object_size;
+      clone_end_snap_id = end_src_snap_id;
+      m_read_whole_object = false;
+    } else {
+      calc_snap_set_diff(m_cct, m_snap_set, start_src_snap_id,
+                         end_src_snap_id, &diff, &end_size, &exists,
+                         &clone_end_snap_id, &m_read_whole_object);
+    }
 
     if (m_read_whole_object) {
       ldout(m_cct, 1) << "need to read full object" << dendl;
@@ -639,7 +672,8 @@ void ObjectCopyRequest<I>::compute_zero_ops() {
   ldout(m_cct, 20) << dendl;
 
   bool fast_diff = m_dst_image_ctx->test_features(RBD_FEATURE_FAST_DIFF);
-  uint64_t prev_end_size = 0;
+  uint64_t prev_end_size = m_dst_object_state.find(m_snap_map.begin()->first) !=
+    m_dst_object_state.end() ? m_dst_image_ctx->layout.object_size : 0;
   for (auto &it : m_dst_zero_interval) {
     auto src_snap_seq = it.first;
     auto &zero_interval = it.second;
@@ -660,7 +694,7 @@ void ObjectCopyRequest<I>::compute_zero_ops() {
       if (z.get_start() + z.get_len() >= end_size) {
         // zero interval at the object end
         if (z.get_start() < prev_end_size) {
-          if (z.get_start() == 0) {
+          if (z.get_start() == 0 && false /* TODO: allow on flattening */) {
             m_write_ops[src_snap_seq]
               .emplace_back(COPY_OP_TYPE_REMOVE, 0, 0, 0);
             ldout(m_cct, 20) << "COPY_OP_TYPE_REMOVE" << dendl;
@@ -681,7 +715,7 @@ void ObjectCopyRequest<I>::compute_zero_ops() {
     }
     ldout(m_cct, 20) << "src_snap_seq=" << src_snap_seq << ", end_size="
                      << end_size << dendl;
-    if (end_size > 0) {
+    if (end_size > 0 || prev_end_size > 0) {
       m_dst_object_state[src_snap_seq] = OBJECT_EXISTS;
       if (fast_diff && end_size == prev_end_size &&
           m_write_ops[src_snap_seq].empty()) {
