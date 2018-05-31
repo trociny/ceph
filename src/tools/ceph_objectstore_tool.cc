@@ -18,6 +18,9 @@
 
 #include <stdlib.h>
 
+#include <iostream>
+#include <fstream>
+
 #include "common/Formatter.h"
 #include "common/errno.h"
 #include "common/ceph_argparse.h"
@@ -1828,6 +1831,31 @@ int do_rm_omap(ObjectStore *store, coll_t coll,
   return 0;
 }
 
+int do_bulkrm_omap(ObjectStore *store, coll_t coll, ghobject_t &ghobj,
+                    std::istream *f, ObjectStore::Sequencer &osr)
+{
+  ObjectStore::Transaction tran;
+  ObjectStore::Transaction *t = &tran;
+  std::set<std::string> keys;
+  std::string key;
+
+  while (std::getline(*f, key)) {
+    if (debug) {
+      std::cerr << "Rm_omap " << ghobj << " " << key <<  std::endl;
+    }
+    keys.insert(key);
+  }
+
+  if (dry_run) {
+    return 0;
+  }
+
+  t->omap_rmkeys(coll, ghobj, keys);
+
+  store->apply_transaction(&osr, std::move(*t));
+  return 0;
+}
+
 int do_get_omaphdr(ObjectStore *store, coll_t coll, ghobject_t &ghobj)
 {
   bufferlist hdrbl;
@@ -2402,7 +2430,7 @@ int main(int argc, char **argv)
   po::options_description positional("Positional options");
   positional.add_options()
     ("object", po::value<string>(&object), "'' for pgmeta_oid, object name or ghobject in json")
-    ("objcmd", po::value<string>(&objcmd), "command [(get|set)-bytes, (get|set|rm)-(attr|omap), (get|set)-omaphdr, list-attrs, list-omap, remove]")
+    ("objcmd", po::value<string>(&objcmd), "command [(get|set)-bytes, (get|set|rm)-(attr|omap), bulkrm-omap, (get|set)-omaphdr, list-attrs, list-omap, remove]")
     ("arg1", po::value<string>(&arg1), "arg1 based on cmd")
     ("arg2", po::value<string>(&arg2), "arg2 based on cmd")
     ("test-align", po::value<uint64_t>(&testalign)->default_value(0), "hidden align option for testing")
@@ -3152,6 +3180,27 @@ int main(int argc, char **argv)
           goto out;
         }
 	ret = do_rm_omap(fs, coll, ghobj, arg1, *osr);
+        goto out;
+      } else if (objcmd == "bulkrm-omap") {
+        std::ifstream ifs;
+        std::istream *f;
+        if (vm.count("arg1") == 0 || arg1 == "-") {
+          if (isatty(STDIN_FILENO)) {
+            cerr << "stdin is a tty and no file specified" << std::endl;
+            ret = 1;
+            goto out;
+          }
+          f = &std::cin;
+        } else {
+          ifs.open(arg1.c_str(), std::ifstream::in);
+          if (!ifs.is_open()) {
+            cerr << "open " << arg1 << " " << cpp_strerror(errno) << std::endl;
+            ret = 1;
+            goto out;
+          }
+          f = &ifs;
+        }
+        ret = do_bulkrm_omap(fs, coll, ghobj, f, *osr);
         goto out;
       } else if (objcmd == "get-omaphdr") {
 	if (vm.count("arg1")) {
