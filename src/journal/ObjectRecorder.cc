@@ -22,12 +22,14 @@ ObjectRecorder::ObjectRecorder(librados::IoCtx &ioctx, const std::string &oid,
                                ContextWQ *work_queue, SafeTimer &timer,
                                Mutex &timer_lock, Handler *handler,
                                uint8_t order, uint32_t flush_interval,
-                               uint64_t flush_bytes, double flush_age)
+                               uint64_t flush_bytes, double flush_age,
+                               uint64_t max_in_flight_appends)
   : RefCountedObject(NULL, 0), m_oid(oid), m_object_number(object_number),
     m_cct(NULL), m_op_work_queue(work_queue), m_timer(timer),
     m_timer_lock(timer_lock), m_handler(handler), m_order(order),
     m_soft_max_size(1 << m_order), m_flush_interval(flush_interval),
-    m_flush_bytes(flush_bytes), m_flush_age(flush_age), m_flush_handler(this),
+    m_flush_bytes(flush_bytes), m_flush_age(flush_age),
+    m_max_in_flight_appends(max_in_flight_appends), m_flush_handler(this),
     m_lock(lock), m_append_tid(0), m_pending_bytes(0),
     m_size(0), m_overflowed(false), m_object_closed(false),
     m_in_flight_flushes(false), m_aio_scheduled(false) {
@@ -99,6 +101,8 @@ void ObjectRecorder::flush(Context *on_safe) {
       future = Future(m_append_buffers.rbegin()->first);
 
       flush_appends(true);
+    } else if (!m_pending_buffers.empty()) {
+      future = Future(m_pending_buffers.rbegin()->first);
     } else if (!m_in_flight_appends.empty()) {
       AppendBuffers &append_buffers = m_in_flight_appends.rbegin()->second;
       assert(!append_buffers.empty());
@@ -263,6 +267,7 @@ void ObjectRecorder::handle_append_flushed(uint64_t tid, int r) {
 
       // notify of overflow once all in-flight ops are complete
       if (m_in_flight_tids.empty() && !m_aio_scheduled) {
+        m_append_buffers.splice(m_append_buffers.begin(), m_pending_buffers);
         append_overflowed();
         notify_handler_unlock();
       } else {
@@ -295,8 +300,18 @@ void ObjectRecorder::handle_append_flushed(uint64_t tid, int r) {
 
   if (m_in_flight_appends.empty() && !m_aio_scheduled && m_object_closed) {
     // all remaining unsent appends should be redirected to new object
+    m_append_buffers.splice(m_append_buffers.begin(), m_pending_buffers);
     notify_handler_unlock();
   } else {
+    if (!m_aio_scheduled && !m_pending_buffers.empty() &&
+        (m_max_in_flight_appends == 0 ||
+         m_in_flight_tids.size() < m_max_in_flight_appends)) {
+      // reschedule additional pending items
+      m_op_work_queue->queue(new FunctionContext([this] (int r) {
+            send_appends_aio();
+          }));
+      m_aio_scheduled = true;
+    }
     m_lock->Unlock();
   }
 }
@@ -362,6 +377,18 @@ void ObjectRecorder::send_appends_aio() {
   C_Gather *gather_ctx;
   {
     Mutex::Locker locker(*m_lock);
+    m_aio_scheduled = false;
+
+    if (m_pending_buffers.empty() ||
+        (m_max_in_flight_appends != 0 &&
+         m_in_flight_tids.size() >= m_max_in_flight_appends)) {
+      ldout(m_cct, 20) << __func__ << ": " << m_oid << " skipping due to "
+                       << (m_pending_buffers.empty() ?
+                           " pending buffers empty" :
+                           " max in flight appends reached") << dendl;
+      return;
+    }
+
     uint64_t append_tid = m_append_tid++;
     m_in_flight_tids.insert(append_tid);
 
@@ -394,7 +421,6 @@ void ObjectRecorder::send_appends_aio() {
   {
     m_lock->Lock();
     if (m_pending_buffers.empty()) {
-      m_aio_scheduled = false;
       if (m_in_flight_appends.empty() && m_object_closed) {
         // all remaining unsent appends should be redirected to new object
         notify_handler_unlock();
@@ -402,10 +428,15 @@ void ObjectRecorder::send_appends_aio() {
         m_lock->Unlock();
       }
     } else {
-      // additional pending items -- reschedule
-      m_op_work_queue->queue(new FunctionContext([this] (int r) {
-          send_appends_aio();
-        }));
+      if (!m_aio_scheduled &&
+          (m_max_in_flight_appends == 0 ||
+           m_in_flight_tids.size() < m_max_in_flight_appends)) {
+        // reschedule additional pending items
+        m_op_work_queue->queue(new FunctionContext([this] (int r) {
+              send_appends_aio();
+            }));
+        m_aio_scheduled = true;
+      }
       m_lock->Unlock();
     }
   }
