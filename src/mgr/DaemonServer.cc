@@ -666,6 +666,11 @@ bool DaemonServer::handle_report(MMgrReport *m)
     py_modules.notify_all("perf_schema_update", oss.str());
   }
 
+  for (auto &it : m->osd_perf_metric_report.data) {
+    dout(10) << "report for " << it.first << " query: "
+             << it.second.size() << " records" << dendl;
+  }
+
   m->put();
   return true;
 }

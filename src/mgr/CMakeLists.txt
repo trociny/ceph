@@ -12,7 +12,7 @@ set(mgr_srcs
   Gil.cc
   Mgr.cc
   MgrStandby.cc
-  OSDPerfMetricQuery.cc
+  OSDPerfMetric.cc
   OSDPerfMetricCollector.cc
   PyFormatter.cc
   PyModule.cc

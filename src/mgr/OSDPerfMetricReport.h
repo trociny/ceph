@@ -3,25 +3,15 @@
 #ifndef OSD_PERF_METRIC_REPORT_H_
 #define OSD_PERF_METRIC_REPORT_H_
 #include "include/denc.h"
-//#include "mgr/OSDPerfMetricQuery"
-
-typedef int OSDPerfMetricQueryID;  //Temporary; to be moved in mgr/OSDPerfMetricQuery.h ?
+#include "mgr/OSDPerfMetric.h"
 
 struct OSDPerfMetricReport
 {
-  OSDPerfMetricQueryID query_id; 
-
-  // Gather from OSD::PerfCounters ?
-  //  client reads/s
-  //  client writes/s
-  //  client read bytes
-  //  client write bytes
-  //  client read latency
-  //  client write latency
+  std::map<OSDPerfMetricQuery, std::map<std::string, uint64_t>> data;
 
   DENC(OSDPerfMetricReport, v, p) {
       DENC_START(1, 1, p);
-      denc(v.query_id, p);
+      denc(v.data, p);
       DENC_FINISH(p);
   }
 };

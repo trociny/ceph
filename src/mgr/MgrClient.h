@@ -20,13 +20,11 @@
 #include "mgr/DaemonHealthMetric.h"
 
 #include "messages/MMgrReport.h"
-#include "mgr/OSDPerfMetricQuery.h"
+#include "mgr/OSDPerfMetric.h"
 
 #include "common/perf_counters.h"
 #include "common/Timer.h"
 #include "common/CommandTable.h"
-
-typedef int OSDPerfMetricReport; //Temporary
 
 class MMgrMap;
 class MMgrConfigure;
@@ -122,13 +120,11 @@ public:
   void set_perf_metric_query_cb(
           std::function<void(const std::list<OSDPerfMetricQuery> &)> cb_set,
           std::function<void(OSDPerfMetricReport *)> cb_get)
-
   {
       Mutex::Locker l(lock);
       set_perf_queries_cb = cb_set;
       get_perf_report_cb = cb_get;
   }
-
 
   void send_pgstats();
   void set_pgstats_cb(std::function<MPGStats*()>&& cb_)

@@ -6,7 +6,7 @@
 
 #include "common/Mutex.h"
 
-#include "mgr/OSDPerfMetricQuery.h"
+#include "mgr/OSDPerfMetric.h"
 
 #include <list>
 #include <set>

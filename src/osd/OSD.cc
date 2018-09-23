@@ -4240,6 +4240,11 @@ PGRef OSD::handle_pg_create_info(const OSDMapRef& osdmap,
     false,
     rctx.transaction);
 
+  if (pg->is_primary()) {
+    Mutex::Locker locker(m_perf_queries_lock);
+    pg->set_dynamic_perf_stats_queries(m_perf_queries);
+  }
+
   pg->handle_initialize(&rctx);
   pg->handle_activate_map(&rctx);
 
@@ -9768,9 +9773,34 @@ int OSD::init_op_flags(OpRequestRef& op)
 }
 
 void OSD::set_perf_queries(const std::list<OSDPerfMetricQuery> &queries) {
+  dout(10) << "setting " << queries.size() << " queries" << dendl;
+
+  Mutex::Locker locker(m_perf_queries_lock);
+  m_perf_queries = queries;
+  std::vector<PGRef> pgs;
+  _get_pgs(&pgs);
+  for (auto& pg : pgs) {
+    if (pg->is_primary()) {
+      pg->lock();
+      pg->set_dynamic_perf_stats_queries(m_perf_queries);
+      pg->unlock();
+    }
+  }
 }
 
 void OSD::get_perf_report(OSDPerfMetricReport *report) {
+  std::vector<PGRef> pgs;
+  _get_pgs(&pgs);
+  for (auto& pg : pgs) {
+    if (pg->is_primary()) {
+      pg->lock();
+      DynamicPerfStats dps(m_perf_queries);
+      pg->get_dynamic_perf_stats(&dps);
+      dps.add_to_report(report);
+      pg->unlock();
+    }
+  }
+  dout(20) << "report for " << report->data.size() << " queries" << dendl;
 }
 
 // =============================================================
