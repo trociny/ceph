@@ -295,6 +295,9 @@ ghobject_t log_oid;
 ghobject_t biginfo_oid;
 
 int file_fd = fd_none;
+std::ifstream file_ifstream;
+std::istream *file_istream = nullptr;
+
 bool debug = false;
 super_header sh;
 uint64_t testalign;
@@ -1557,6 +1560,109 @@ int do_remove_object(ObjectStore *store, coll_t coll,
   return 0;
 }
 
+int do_bulk_remove_objects(ObjectStore *store, coll_t coll, std::istream *f,
+                           const spg_t &pgid, ObjectStore::Sequencer &osr,
+                           bool force)
+{
+  spg_t pg;
+  coll.is_pg_prefix(&pg);
+  OSDriver driver(
+    store,
+    coll_t(),
+    OSD::make_snapmapper_oid());
+  SnapMapper mapper(&driver, 0, 0, 0, pg.shard);
+
+  ObjectStore::Transaction t;
+  OSDriver::OSTransaction _t(driver.get_transaction(&t));
+
+  std::string object;
+  while (std::getline(*f, object)) {
+    ghobject_t ghobj;
+
+    json_spirit::Value v;
+    try {
+      stringstream ss;
+      if (!json_spirit::read(object, v)) {
+        ss << "can't parse '" << object << "' as JSON";
+        throw std::runtime_error(ss.str());
+      }
+      if (v.type() != json_spirit::array_type) {
+        ss << "the object '" << object << "' must be a JSON array";
+        throw std::runtime_error(ss.str());
+      }
+      json_spirit::Array array = v.get_array();
+      if (array.size() != 2) {
+        ss << "Object '" << object
+           << "' must be a JSON array with 2 elements";
+        throw std::runtime_error(ss.str());
+      }
+      vector<json_spirit::Value>::iterator i = array.begin();
+      if (i->type() != json_spirit::str_type) {
+        ss << "Object '" << object
+           << "' must be a JSON array with the first element a string";
+        throw std::runtime_error(ss.str());
+      }
+
+      string object_pgidstr = i->get_str();
+      spg_t object_pgid;
+      object_pgid.parse(object_pgidstr.c_str());
+      if (object_pgid != pgid) {
+        ss << "object '" << object << "' has a pgid different from the --pgid="
+           << pgid << " option";
+        throw std::runtime_error(ss.str());
+      }
+
+      ++i;
+      v = *i;
+
+      try {
+        ghobj.decode(v);
+      } catch (std::runtime_error& e) {
+        ss << "Decode object JSON error: " << e.what();
+        throw std::runtime_error(ss.str());
+      }
+      if ((uint64_t)object_pgid.pgid.m_pool != (uint64_t)ghobj.hobj.pool) {
+        ss << "Object pool and pgid pool don't match" << std::endl;
+        throw std::runtime_error(ss.str());
+      }
+    } catch (std::runtime_error& e) {
+      cerr << e.what() << std::endl;
+      continue;
+    }
+
+    if (!force) {
+      struct stat st;
+      int r = store->stat(coll, ghobj, &st);
+      if (r < 0) {
+        cerr << "stat " << ghobj << " : " << cpp_strerror(r) << std::endl;
+        continue;
+      }
+    }
+
+    if (debug) {
+      std::cerr << "remove " << ghobj <<  std::endl;
+    }
+
+    if (dry_run) {
+      continue;
+    }
+
+    int r = mapper.remove_oid(ghobj.hobj, &_t);
+    if (r < 0 && r != -ENOENT) {
+      cerr << "remove_oid returned " << cpp_strerror(r) << std::endl;
+    }
+
+    t.remove(coll, ghobj);
+  }
+
+  if (dry_run) {
+    return 0;
+  }
+
+  store->apply_transaction(&osr, std::move(t));
+  return 0;
+}
+
 int do_list_attrs(ObjectStore *store, coll_t coll, ghobject_t &ghobj)
 {
   map<string,bufferptr> aset;
@@ -2408,7 +2514,7 @@ int main(int argc, char **argv)
      "Pool name, mandatory for apply-layout-settings if --pgid is not specified")
     ("op", po::value<string>(&op),
      "Arg is one of [info, log, remove, mkfs, fsck, fuse, export, import, list, fix-lost, list-pgs, rm-past-intervals, dump-journal, dump-super, meta-list, "
-     "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, apply-layout-settings, update-mon-db, trim-pg-log]")
+     "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, apply-layout-settings, update-mon-db, trim-pg-log, remove-objects]")
     ("epoch", po::value<unsigned>(&epoch),
      "epoch# for get-osdmap and get-inc-osdmap, the current epoch in use if not specified")
     ("file", po::value<string>(&file),
@@ -2561,23 +2667,35 @@ int main(int argc, char **argv)
     } else {
       file_fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0666);
     }
-  } else if (op == "import" || op == "set-osdmap" || op == "set-inc-osdmap") {
+  } else if (op == "import" || op == "set-osdmap" || op == "set-inc-osdmap" || op == "remove-objects") {
     if (!vm.count("file") || file == "-") {
       if (isatty(STDIN_FILENO)) {
         cerr << "stdin is a tty and no --file filename specified" << std::endl;
         return 1;
       }
-      file_fd = STDIN_FILENO;
+      if (op == "remove-objects") {
+        file_istream = &std::cin;
+      } else {
+        file_fd = STDIN_FILENO;
+      }
     } else {
-      file_fd = open(file.c_str(), O_RDONLY);
+      if (op == "remove-objects") {
+        file_ifstream.open(file.c_str(), std::ifstream::in);
+        if (!file_ifstream.is_open()) {
+          cerr << "open " << file << " " << cpp_strerror(errno) << std::endl;
+        }
+        file_istream = &file_ifstream;
+      } else {
+        file_fd = open(file.c_str(), O_RDONLY);
+      }
     }
   }
 
   ObjectStoreTool tool = ObjectStoreTool(file_fd, dry_run);
 
-  if (vm.count("file") && file_fd == fd_none && !dry_run) {
+  if (vm.count("file") && file_fd == fd_none && file_istream == nullptr && !dry_run) {
     cerr << "--file option only applies to import, export, "
-	 << "get-osdmap, set-osdmap, get-inc-osdmap or set-inc-osdmap" << std::endl;
+	 << "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap or remove-objects" << std::endl;
     return 1;
   }
 
@@ -2835,7 +2953,7 @@ int main(int argc, char **argv)
   // mentioned in the usage for --pgid.
   if ((op == "info" || op == "log" || op == "remove" || op == "export"
       || op == "rm-past-intervals" || op == "mark-complete"
-      || op == "trim-pg-log") &&
+      || op == "trim-pg-log" || op == "remove-objects") &&
       pgidstr.length() == 0) {
     cerr << "Must provide pgid" << std::endl;
     usage(desc);
@@ -3031,9 +3149,9 @@ int main(int argc, char **argv)
 
   // If not an object command nor any of the ops handled below, then output this usage
   // before complaining about a bad pgid
-  if (!vm.count("objcmd") && op != "export" && op != "info" && op != "log" && op != "rm-past-intervals" && op != "mark-complete" && op != "trim-pg-log") {
+  if (!vm.count("objcmd") && op != "export" && op != "info" && op != "log" && op != "rm-past-intervals" && op != "mark-complete" && op != "trim-pg-log" && op != "remove-objects") {
     cerr << "Must provide --op (info, log, remove, mkfs, fsck, export, import, list, fix-lost, list-pgs, rm-past-intervals, dump-journal, dump-super, meta-list, "
-      "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, trim-pg-log)"
+      "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, trim-pg-log, remove-objects)"
 	 << std::endl;
     usage(desc);
     ret = 1;
@@ -3407,6 +3525,9 @@ int main(int argc, char **argv)
 	goto out;
       }
       cout << "Finished trimming pg log" << std::endl;
+      goto out;
+    } else if (op == "remove-objects") {
+      ret = do_bulk_remove_objects(fs, coll, file_istream, pgid, *osr, force);
       goto out;
     } else {
       assert(!"Should have already checked for valid --op");
