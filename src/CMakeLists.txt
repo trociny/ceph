@@ -316,6 +316,7 @@ set(libcommon_files
   mon/MonMap.cc
   mon/MonSub.cc
   mgr/MgrClient.cc
+  mgr/OSDPerfMetric.cc
   mgr/ServiceMap.cc
   osd/ECMsgTypes.cc
   osd/HitSet.cc

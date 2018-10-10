@@ -4144,13 +4144,14 @@ void PrimaryLogPG::log_op_stats(const OpRequest& op,
 	   << " outb " << outb
 	   << " lat " << latency << dendl;
 
+  ceph_assert(is_locked());
   if (m_dynamic_perf_stats.is_enabled()) {
     m_dynamic_perf_stats.add(m, inb, outb, latency);
   }
 }
 
 void PrimaryLogPG::set_dynamic_perf_stats_queries(
-    const std::list<OSDPerfMetricQuery> &queries)
+    const std::list<OSDPerfMetricQueryEntry> &queries)
 {
   m_dynamic_perf_stats.set_queries(queries);
 }

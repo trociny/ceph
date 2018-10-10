@@ -12,7 +12,6 @@ set(mgr_srcs
   Gil.cc
   Mgr.cc
   MgrStandby.cc
-  OSDPerfMetric.cc
   OSDPerfMetricCollector.cc
   PyFormatter.cc
   PyModule.cc

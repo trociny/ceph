@@ -24,7 +24,7 @@ class OSDPerfQuery(MgrModule):
 
     def handle_command(self, inbuf, cmd):
         if cmd['prefix'] == "osd perf query add":
-            query_id = self.add_osd_perf_query(cmd['query'])
+            query_id = self.add_osd_perf_query({'type' : cmd['query']})
             return 0, str(query_id), "added query " + cmd['query'] + " with id " + str(query_id)
         elif cmd['prefix'] == "osd perf query remove":
             self.remove_osd_perf_query(cmd['query_id'])

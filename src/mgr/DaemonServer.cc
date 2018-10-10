@@ -669,6 +669,9 @@ bool DaemonServer::handle_report(MMgrReport *m)
   for (auto &it : m->osd_perf_metric_report.data) {
     dout(10) << "report for " << it.first << " query: "
              << it.second.size() << " records" << dendl;
+    for (auto &record_it : it.second) {
+      dout(20) << record_it.first << " " << record_it.second << dendl;
+    }
   }
 
   m->put();

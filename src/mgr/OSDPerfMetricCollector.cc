@@ -15,10 +15,10 @@ OSDPerfMetricCollector::OSDPerfMetricCollector(Listener &listener)
   : listener(listener), lock("OSDPerfMetricCollector::lock") {
 }
 
-std::list<OSDPerfMetricQuery> OSDPerfMetricCollector::get_queries() {
+std::list<OSDPerfMetricQueryEntry> OSDPerfMetricCollector::get_queries() {
   Mutex::Locker locker(lock);
 
-  std::list<OSDPerfMetricQuery> query_list;
+  std::list<OSDPerfMetricQueryEntry> query_list;
   for (auto &it : queries) {
     query_list.push_back(it.first);
   }
@@ -26,7 +26,8 @@ std::list<OSDPerfMetricQuery> OSDPerfMetricCollector::get_queries() {
   return query_list;
 }
 
-int OSDPerfMetricCollector::add_query(const OSDPerfMetricQuery& query) {
+int OSDPerfMetricCollector::add_query(const OSDPerfMetricQuery& q) {
+  OSDPerfMetricQueryEntry query(q);
   uint64_t query_id;
   bool notify = false;
 

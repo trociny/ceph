@@ -642,15 +642,31 @@ ceph_dispatch_remote(BaseMgrModule *self, PyObject *args)
 static PyObject*
 ceph_add_osd_perf_query(BaseMgrModule *self, PyObject *args)
 {
-  // TODO: parse args to build OSDPerfMetricQuery.
-  // For now it is ignored and can be anything.
+  // TODO: a better parser for OSDPerfMetricQuery.
+  OSDPerfMetricQuery query = ClientIdOSDPerfMetricQuery();
+
   PyObject *query_ = nullptr;
   if (!PyArg_ParseTuple(args, "O:ceph_add_osd_perf_query", &query_)) {
     derr << "Invalid args!" << dendl;
     return nullptr;
   }
 
-  OSDPerfMetricQuery query;
+  if (PyDict_Check(query_)) {
+    PyObject *kvs = PyDict_Items(query_);
+    for (int i = 0; i < PyList_Size(kvs); ++i) {
+      PyObject *kv = PyList_GET_ITEM(kvs, i);
+      char *name = nullptr;
+      char *value = nullptr;
+      if (!PyArg_ParseTuple(kv, "ss:pair", &name, &value)) {
+        continue;
+      }
+      if (std::string(name) == "type" &&
+          std::string(value) == "by_rbd_image_id") {
+        query = RBDImageIdOSDPerfMetricQuery();
+      }
+    }
+  }
+
   auto query_id = self->py_modules->add_osd_perf_query(query);
   return PyLong_FromLong(query_id);
 }

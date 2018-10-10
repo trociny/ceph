@@ -2306,11 +2306,12 @@ public:
   friend class OSDService;
 
 private:
-  void set_perf_queries(const std::list<OSDPerfMetricQuery> &queries);
+  void set_perf_queries(
+      const std::list<OSDPerfMetricQueryEntry> &queries);
   void get_perf_report(OSDPerfMetricReport *report);
 
   Mutex m_perf_queries_lock = {"OSD::m_perf_queries_lock"};
-  std::list<OSDPerfMetricQuery> m_perf_queries;
+  std::list<OSDPerfMetricQueryEntry> m_perf_queries;
 };
 
 

@@ -32,7 +32,6 @@
 
 class health_check_map_t;
 class DaemonServer;
-struct OSDPerfMetricQuery;
 
 class ActivePyModules
 {

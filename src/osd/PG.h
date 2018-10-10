@@ -483,7 +483,7 @@ public:
   void _delete_some(ObjectStore::Transaction *t);
 
   virtual void set_dynamic_perf_stats_queries(
-    const std::list<OSDPerfMetricQuery> &queries) {
+    const std::list<OSDPerfMetricQueryEntry> &queries) {
   }
   virtual void get_dynamic_perf_stats(DynamicPerfStats *stats) {
   }

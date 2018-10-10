@@ -25,14 +25,14 @@ public:
 
   OSDPerfMetricCollector(Listener &listener);
 
-  std::list<OSDPerfMetricQuery> get_queries();
+  std::list<OSDPerfMetricQueryEntry> get_queries();
 
   OSDPerfMetricQueryID add_query(const OSDPerfMetricQuery& query);
   int remove_query(OSDPerfMetricQueryID query_id);
   void remove_all_queries();
 
 private:
-  typedef std::map<OSDPerfMetricQuery, std::set<OSDPerfMetricQueryID>> Queries;
+  typedef std::map<OSDPerfMetricQueryEntry, std::set<OSDPerfMetricQueryID>> Queries;
 
   Listener &listener;
   mutable Mutex lock;

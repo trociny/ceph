@@ -1867,7 +1867,7 @@ public:
 
 public:
   void set_dynamic_perf_stats_queries(
-      const std::list<OSDPerfMetricQuery> &queries)  override;
+      const std::list<OSDPerfMetricQueryEntry> &queries)  override;
   void get_dynamic_perf_stats(DynamicPerfStats *stats)  override;
 
 private:

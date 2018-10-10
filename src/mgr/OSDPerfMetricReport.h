@@ -7,7 +7,7 @@
 
 struct OSDPerfMetricReport
 {
-  std::map<OSDPerfMetricQuery, std::map<std::string, uint64_t>> data;
+  std::map<OSDPerfMetricQueryEntry, std::map<std::string, uint64_t>> data;
 
   DENC(OSDPerfMetricReport, v, p) {
       DENC_START(1, 1, p);

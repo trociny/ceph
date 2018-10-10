@@ -12,14 +12,15 @@ public:
   DynamicPerfStats() {
   }
 
-  DynamicPerfStats(const std::list<OSDPerfMetricQuery> &queries) {
+  DynamicPerfStats(const std::list<OSDPerfMetricQueryEntry> &queries) {
     for (auto &query : queries) {
       data[query];
     }
   }
 
-  void set_queries(const std::list<OSDPerfMetricQuery> &queries) {
-    std::map<OSDPerfMetricQuery, std::map<std::string, PerfCounters>> new_data;
+  void set_queries(const std::list<OSDPerfMetricQueryEntry> &queries) {
+    std::map<OSDPerfMetricQueryEntry,
+             std::map<std::string, PerfCounters>> new_data;
     for (auto &query : queries) {
       new_data[query] = std::move(data[query]);
     }
@@ -33,7 +34,10 @@ public:
   void add(const MOSDOp *m, uint64_t inb, uint64_t outb, const utime_t &latency) {
     for (auto &it : data) {
       auto &query = it.first;
-      it.second[query(m)] += {1, inb, outb, latency.to_nsec()};
+      std::string key;
+      if (query(m, &key)) {
+        it.second[key] += {1, inb, outb, latency.to_nsec()};
+      }
     }
   }
 
@@ -73,7 +77,7 @@ private:
     }
   };
 
-  std::map<OSDPerfMetricQuery, std::map<std::string, PerfCounters>> data;
+  std::map<OSDPerfMetricQueryEntry, std::map<std::string, PerfCounters>> data;
 };
 
 #endif // DYNAMIC_PERF_STATS_H

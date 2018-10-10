@@ -40,7 +40,6 @@ class MMonMgrReport;
 class MCommand;
 struct MonCommand;
 class CommandContext;
-struct OSDPerfMetricQuery;
 
 
 /**
