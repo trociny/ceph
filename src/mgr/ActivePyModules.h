@@ -92,7 +92,8 @@ public:
       const std::string &svc_id,
       const std::string &path) const;
 
-  OSDPerfMetricQueryID add_osd_perf_query(const OSDPerfMetricQuery &query);
+  OSDPerfMetricQueryID add_osd_perf_query(const OSDPerfMetricQuery &query,
+                                          OSDPerfMetricHandler handler);
   void remove_osd_perf_query(OSDPerfMetricQueryID query_id);
 
   bool get_store(const std::string &module_name,

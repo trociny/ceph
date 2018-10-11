@@ -171,7 +171,8 @@ public:
 
   void _send_configure(ConnectionRef c);
 
-  OSDPerfMetricQueryID add_osd_perf_query(const OSDPerfMetricQuery &query);
+  OSDPerfMetricQueryID add_osd_perf_query(
+      const OSDPerfMetricQuery &query, OSDPerfMetricHandler handler);
   int remove_osd_perf_query(OSDPerfMetricQueryID query_id);
 
   virtual const char** get_tracked_conf_keys() const override;

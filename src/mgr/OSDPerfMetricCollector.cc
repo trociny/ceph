@@ -15,7 +15,7 @@ OSDPerfMetricCollector::OSDPerfMetricCollector(Listener &listener)
   : listener(listener), lock("OSDPerfMetricCollector::lock") {
 }
 
-std::list<OSDPerfMetricQueryEntry> OSDPerfMetricCollector::get_queries() {
+std::list<OSDPerfMetricQueryEntry> OSDPerfMetricCollector::get_queries() const {
   Mutex::Locker locker(lock);
 
   std::list<OSDPerfMetricQueryEntry> query_list;
@@ -26,7 +26,26 @@ std::list<OSDPerfMetricQueryEntry> OSDPerfMetricCollector::get_queries() {
   return query_list;
 }
 
-int OSDPerfMetricCollector::add_query(const OSDPerfMetricQuery& q) {
+void OSDPerfMetricCollector::notify_handlers(
+    const OSDPerfMetricQueryEntry &query, const std::string &daemon,
+    const OSDPerfMetricData &data) const {
+  Mutex::Locker locker(lock);
+
+  dout(10) << query << dendl;
+
+  auto it = queries.find(query);
+  if (it == queries.end()) {
+    return;
+  }
+
+  for (auto &iter : it->second) {
+    dout(20) << "executing handler for query_id=" << iter.first << dendl;
+    iter.second(daemon, data);
+  }
+}
+
+int OSDPerfMetricCollector::add_query(const OSDPerfMetricQuery& q,
+                                      OSDPerfMetricHandler handler) {
   OSDPerfMetricQueryEntry query(q);
   uint64_t query_id;
   bool notify = false;
@@ -40,7 +59,7 @@ int OSDPerfMetricCollector::add_query(const OSDPerfMetricQuery& q) {
       it = queries.insert({query, {}}).first;
       notify = true;
     }
-    it->second.insert(query_id);
+    it->second.insert({query_id, handler});
   }
 
   dout(10) << query << " query_id=" << query_id << dendl;

@@ -669,9 +669,9 @@ bool DaemonServer::handle_report(MMgrReport *m)
   for (auto &it : m->osd_perf_metric_report.data) {
     dout(10) << "report for " << it.first << " query: "
              << it.second.size() << " records" << dendl;
-    for (auto &record_it : it.second) {
-      dout(20) << record_it.first << " " << record_it.second << dendl;
-    }
+
+    osd_perf_metric_collector.notify_handlers(it.first, to_string(key),
+                                              it.second);
   }
 
   m->put();
@@ -2560,9 +2560,9 @@ void DaemonServer::_send_configure(ConnectionRef c)
 }
 
 OSDPerfMetricQueryID DaemonServer::add_osd_perf_query(
-  const OSDPerfMetricQuery &query)
+    const OSDPerfMetricQuery &query, OSDPerfMetricHandler handler)
 {
-  return osd_perf_metric_collector.add_query(query);
+  return osd_perf_metric_collector.add_query(query, handler);
 }
 
 int DaemonServer::remove_osd_perf_query(OSDPerfMetricQueryID query_id)

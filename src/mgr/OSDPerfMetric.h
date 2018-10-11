@@ -10,6 +10,7 @@
 
 #include <boost/algorithm/string/predicate.hpp>
 
+#include <functional>
 #include <ostream>
 
 namespace ceph {
@@ -17,6 +18,10 @@ class Formatter;
 }
 
 typedef int OSDPerfMetricQueryID;
+
+typedef std::map<std::string, uint64_t> OSDPerfMetricData;
+typedef std::function<void(const std::string &daemon,
+                           const OSDPerfMetricData &data)> OSDPerfMetricHandler;
 
 enum OSDPerfMetricQueryType {
   OSD_PERF_QUERY_TYPE_CLIENT_ID = 0,

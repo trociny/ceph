@@ -9,7 +9,7 @@
 #include "mgr/OSDPerfMetric.h"
 
 #include <list>
-#include <set>
+#include <map>
 
 /**
  * OSD performance query class.
@@ -25,14 +25,20 @@ public:
 
   OSDPerfMetricCollector(Listener &listener);
 
-  std::list<OSDPerfMetricQueryEntry> get_queries();
+  std::list<OSDPerfMetricQueryEntry> get_queries() const;
+  void notify_handlers(const OSDPerfMetricQueryEntry &query,
+                       const std::string &daemon,
+                       const OSDPerfMetricData &data) const;
 
-  OSDPerfMetricQueryID add_query(const OSDPerfMetricQuery& query);
+  OSDPerfMetricQueryID add_query(const OSDPerfMetricQuery& query,
+                                 OSDPerfMetricHandler handler);
   int remove_query(OSDPerfMetricQueryID query_id);
   void remove_all_queries();
 
 private:
-  typedef std::map<OSDPerfMetricQueryEntry, std::set<OSDPerfMetricQueryID>> Queries;
+  typedef std::map<OSDPerfMetricQueryEntry,
+                   std::map<OSDPerfMetricQueryID,
+                            OSDPerfMetricHandler>> Queries;
 
   Listener &listener;
   mutable Mutex lock;

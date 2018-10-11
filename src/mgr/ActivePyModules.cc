@@ -891,9 +891,9 @@ void ActivePyModules::set_uri(const std::string& module_name,
 }
 
 OSDPerfMetricQueryID ActivePyModules::add_osd_perf_query(
-  const OSDPerfMetricQuery &query)
+  const OSDPerfMetricQuery &query, OSDPerfMetricHandler handler)
 {
-  return server.add_osd_perf_query(query);
+  return server.add_osd_perf_query(query, handler);
 }
 
 void ActivePyModules::remove_osd_perf_query(OSDPerfMetricQueryID query_id)

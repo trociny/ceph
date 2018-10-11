@@ -667,7 +667,16 @@ ceph_add_osd_perf_query(BaseMgrModule *self, PyObject *args)
     }
   }
 
-  auto query_id = self->py_modules->add_osd_perf_query(query);
+  // TODO: allow a caller to register its own handler
+  OSDPerfMetricHandler handler = [](const std::string &daemon,
+                                    const OSDPerfMetricData &data) {
+    for (auto &it : data) {
+      dout(20) << "got perf data from " << daemon << ": " << it.first << " "
+               << it.second << dendl;
+    }
+  };
+
+  auto query_id = self->py_modules->add_osd_perf_query(query, handler);
   return PyLong_FromLong(query_id);
 }
 
