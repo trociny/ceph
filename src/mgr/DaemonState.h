@@ -18,7 +18,6 @@
 #include <string>
 #include <memory>
 #include <set>
-#include <boost/circular_buffer.hpp>
 
 #include "common/RWLock.h"
 #include "include/str_map.h"
@@ -27,6 +26,8 @@
 
 // For PerfCounterType
 #include "messages/MMgrReport.h"
+
+#include "PerfCounterInstance.h"
 
 namespace ceph {
   class Formatter;
@@ -38,66 +39,6 @@ typedef std::pair<std::string, std::string> DaemonKey;
 static inline std::string to_string(const DaemonKey& dk) {
   return dk.first + "." + dk.second;
 }
-
-// An instance of a performance counter type, within
-// a particular daemon.
-class PerfCounterInstance
-{
-  class DataPoint
-  {
-    public:
-    utime_t t;
-    uint64_t v;
-    DataPoint(utime_t t_, uint64_t v_)
-      : t(t_), v(v_)
-    {}
-  };
-
-  class AvgDataPoint
-  {
-    public:
-    utime_t t;
-    uint64_t s;
-    uint64_t c;
-    AvgDataPoint(utime_t t_, uint64_t s_, uint64_t c_)
-      : t(t_), s(s_), c(c_)
-    {}
-  };
-
-  boost::circular_buffer<DataPoint> buffer;
-  boost::circular_buffer<AvgDataPoint> avg_buffer;
-
-  uint64_t get_current() const;
-
-  public:
-  const boost::circular_buffer<DataPoint> & get_data() const
-  {
-    return buffer;
-  }
-  const DataPoint& get_latest_data() const
-  {
-    return buffer.back();
-  }
-  const boost::circular_buffer<AvgDataPoint> & get_data_avg() const
-  {
-    return avg_buffer;
-  }
-  const AvgDataPoint& get_latest_data_avg() const
-  {
-    return avg_buffer.back();
-  }
-  void push(utime_t t, uint64_t const &v);
-  void push_avg(utime_t t, uint64_t const &s, uint64_t const &c);
-
-  PerfCounterInstance(enum perfcounter_type_d type)
-  {
-    if (type & PERFCOUNTER_LONGRUNAVG)
-      avg_buffer = boost::circular_buffer<AvgDataPoint>(20);
-    else
-      buffer = boost::circular_buffer<DataPoint>(20);
-  };
-};
-
 
 typedef std::map<std::string, PerfCounterType> PerfCounterTypes;
 

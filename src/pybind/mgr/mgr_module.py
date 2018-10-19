@@ -920,3 +920,73 @@ class MgrModule(ceph_module.BaseMgrModule):
         :param int query_id: query ID
         """
         return self._ceph_remove_osd_perf_query(query_id)
+
+    def get_rbd_perf_schema(self):
+        """
+        Called by the plugin to fetch an RBD image perf counter schema info.
+
+        :return: list of dicts describing the counters requested
+        """
+        return self._ceph_get_rbd_perf_schema()
+
+    def get_rbd_perf_counter(self, pool_id, image_id, counter_name):
+        """
+        Called by the plugin to fetch the latest performance counter data for a
+        particular counter on a particular service.
+
+        :param int pool_id:
+        :param str image_id:
+        :param str counter_name:
+        :return: A list of two-tuples of (timestamp, value) is returned.  This may be
+            empty if no data is available.
+        """
+        return self._ceph_get_rbd_perf_counter(pool_id, image_id, counter_name)
+
+    def get_rbd_perf_latest(self, pool_id, image_id, counter):
+        data = self._ceph_get_latest_rbd_perf_counter(pool_id, image_id, counter)[counter]
+        if data:
+            return data[1]
+        else:
+            return 0
+
+    def get_rbd_perf_latest_avg(self, pool_id, image_id, counter):
+        data = self._ceph_get_latest_rbd_perf_counter(pool_id, image_id, counter)[counter]
+        if data:
+            return (data[1], data[2])
+        else:
+            return (0, 0)
+
+    def get_all_rbd_perf_counters(self, pool_id, image_id):
+        """
+        Return the perf counters currently known to the RBD image.
+
+        """
+
+        result = defaultdict(dict)
+
+
+        schema = self.get_rbd_perf_schema()
+        svc_full_name = 'rbd_image_perf_counters'
+        schema = schema[svc_full_name]
+
+        for counter_path, counter_schema in schema.items():
+            # self.log.debug("{0}: {1}".format(
+            #     counter_path, json.dumps(counter_schema)
+            # ))
+            counter_info = dict(counter_schema)
+
+            # Also populate count for the long running avgs
+            if counter_schema['type'] & self.PERFCOUNTER_LONGRUNAVG:
+                v, c = self.get_rbd_perf_latest_avg(
+                    pool_id, image_id, counter_path)
+                counter_info['value'], counter_info['count'] = v, c
+                result[svc_full_name][counter_path] = counter_info
+            else:
+                counter_info['value'] = self.get_rbd_perf_latest(
+                    pool_id, image_id, counter_path)
+
+            result[svc_full_name][counter_path] = counter_info
+
+        self.log.debug("returning {0} counter".format(len(result)))
+
+        return result

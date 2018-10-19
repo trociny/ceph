@@ -693,6 +693,42 @@ ceph_remove_osd_perf_query(BaseMgrModule *self, PyObject *args)
   Py_RETURN_NONE;
 }
 
+static PyObject*
+get_rbd_perf_counter(BaseMgrModule *self, PyObject *args)
+{
+  int64_t pool_id;
+  char *image_id = nullptr;
+  char *counter_name = nullptr;
+  if (!PyArg_ParseTuple(args, "lss:get_rbd_perf_counter", &pool_id, &image_id,
+                        &counter_name)) {
+    return nullptr;
+  }
+
+  return self->py_modules->get_rbd_perf_counter_python(
+      pool_id, image_id, counter_name);
+}
+
+static PyObject*
+get_latest_rbd_perf_counter(BaseMgrModule *self, PyObject *args)
+{
+  int64_t pool_id;
+  char *image_id = nullptr;
+  char *counter_name = nullptr;
+  if (!PyArg_ParseTuple(args, "lss:get_latest_rbd_perf_counter", &pool_id,
+                        &image_id, &counter_name)) {
+    return nullptr;
+  }
+
+  return self->py_modules->get_latest_rbd_perf_counter_python(
+      pool_id, image_id, counter_name);
+}
+
+static PyObject*
+get_rbd_perf_schema(BaseMgrModule *self, PyObject *args)
+{
+  return self->py_modules->get_rbd_perf_schema_python();
+}
+
 PyMethodDef BaseMgrModule_methods[] = {
   {"_ceph_get", (PyCFunction)ceph_state_get, METH_VARARGS,
    "Get a cluster object"},
@@ -769,6 +805,16 @@ PyMethodDef BaseMgrModule_methods[] = {
 
   {"_ceph_remove_osd_perf_query", (PyCFunction)ceph_remove_osd_perf_query,
     METH_VARARGS, "Remove an osd perf query"},
+
+  {"_ceph_get_rbd_perf_counter", (PyCFunction)get_rbd_perf_counter,
+    METH_VARARGS, "Get a RBD image performance counter"},
+
+  {"_ceph_get_latest_rbd_perf_counter",
+    (PyCFunction)get_latest_rbd_perf_counter, METH_VARARGS,
+    "Get RBD image the latest performance counter"},
+
+  {"_ceph_get_rbd_perf_schema", (PyCFunction)get_rbd_perf_schema, METH_VARARGS,
+    "Get the RBD image performance counter schema"},
 
   {NULL, NULL, 0, NULL}
 };

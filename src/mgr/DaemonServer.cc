@@ -42,8 +42,6 @@
 #undef dout_prefix
 #define dout_prefix *_dout << "mgr.server " << __func__ << " "
 
-
-
 DaemonServer::DaemonServer(MonClient *monc_,
                            Finisher &finisher_,
 			   DaemonStateIndex &daemon_state_,
@@ -144,6 +142,12 @@ int DaemonServer::init(uint64_t gid, entity_addrvec_t client_addrs)
 
   msgr->start();
   msgr->add_dispatcher_tail(this);
+
+  add_osd_perf_query(RBDImageIdOSDPerfMetricQuery(),
+                     [this](const std::string &daemon,
+                            const OSDPerfMetricData &data) {
+                       rbd_perf_counters.update(data);
+                     });
 
   started_at = ceph_clock_now();
 
@@ -2568,4 +2572,19 @@ OSDPerfMetricQueryID DaemonServer::add_osd_perf_query(
 int DaemonServer::remove_osd_perf_query(OSDPerfMetricQueryID query_id)
 {
   return osd_perf_metric_collector.remove_query(query_id);
+}
+
+std::map<std::string, PerfCounterType>
+    DaemonServer::get_rbd_perf_counter_types() const
+{
+  return rbd_perf_counters.get_types();
+}
+
+int DaemonServer::get_rbd_perf_counter(int64_t pool_id,
+                                       const std::string &image_id,
+                                       const std::string &name,
+                                       PerfCounterType *type,
+                                       PerfCounterInstance *instance) const
+{
+  return rbd_perf_counters.get_counter(pool_id, image_id, name, type, instance);
 }

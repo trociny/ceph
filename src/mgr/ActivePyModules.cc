@@ -905,6 +905,109 @@ void ActivePyModules::remove_osd_perf_query(OSDPerfMetricQueryID query_id)
   }
 }
 
+PyObject* ActivePyModules::with_rbd_perf_counters(
+    std::function<void(PerfCounterInstance& counter_instance, PerfCounterType& counter_type, PyFormatter& f)> fct,
+    int64_t pool_id, const std::string &image_id,
+    const std::string &counter_name) const
+{
+  PyThreadState *tstate = PyEval_SaveThread();
+  Mutex::Locker l(lock);
+  PyEval_RestoreThread(tstate);
+
+  PyFormatter f;
+  f.open_array_section(counter_name.c_str());
+
+  PerfCounterType counter_type;
+  PerfCounterInstance counter_instance;
+  int r = server.get_rbd_perf_counter(pool_id, image_id, counter_name,
+                                      &counter_type, &counter_instance);
+  if (r == 0) {
+    fct(counter_instance, counter_type, f);
+  } else {
+    dout(20) << "Missing rbd perf counter: '" << counter_name << "' ("
+             << pool_id << "." << image_id << ")" << dendl;
+  }
+  f.close_section();
+  return f.get();
+}
+
+PyObject* ActivePyModules::get_rbd_perf_counter_python(
+    int64_t pool_id, const std::string &image_id,
+    const std::string &counter_name)
+{
+  auto extract_counters = [](
+      PerfCounterInstance& counter_instance,
+      PerfCounterType& counter_type,
+      PyFormatter& f)
+  {
+    if (counter_type.type & PERFCOUNTER_LONGRUNAVG) {
+      const auto &avg_data = counter_instance.get_data_avg();
+      for (const auto &datapoint : avg_data) {
+        f.open_array_section("datapoint");
+        f.dump_unsigned("t", datapoint.t.sec());
+        f.dump_unsigned("s", datapoint.s);
+        f.dump_unsigned("c", datapoint.c);
+        f.close_section();
+      }
+    } else {
+      const auto &data = counter_instance.get_data();
+      for (const auto &datapoint : data) {
+        f.open_array_section("datapoint");
+        f.dump_unsigned("t", datapoint.t.sec());
+        f.dump_unsigned("v", datapoint.v);
+        f.close_section();
+      }
+    }
+  };
+  return with_rbd_perf_counters(extract_counters, pool_id, image_id,
+                                counter_name);
+}
+
+PyObject* ActivePyModules::get_latest_rbd_perf_counter_python(
+    int64_t pool_id, const std::string &image_id,
+    const std::string &counter_name)
+{
+  auto extract_latest_counters = [](
+      PerfCounterInstance& counter_instance,
+      PerfCounterType& counter_type,
+      PyFormatter& f)
+  {
+    if (counter_type.type & PERFCOUNTER_LONGRUNAVG) {
+      const auto &datapoint = counter_instance.get_latest_data_avg();
+      f.dump_unsigned("t", datapoint.t.sec());
+      f.dump_unsigned("s", datapoint.s);
+      f.dump_unsigned("c", datapoint.c);
+    } else {
+      const auto &datapoint = counter_instance.get_latest_data();
+      f.dump_unsigned("t", datapoint.t.sec());
+      f.dump_unsigned("v", datapoint.v);
+    }
+  };
+  return with_rbd_perf_counters(extract_latest_counters, pool_id, image_id,
+                                counter_name);
+}
+
+PyObject* ActivePyModules::get_rbd_perf_schema_python()
+{
+  auto types = server.get_rbd_perf_counter_types();
+  PyFormatter f;
+  f.open_object_section("rbd_image_perf_counters");
+  for (auto it : types) {
+    f.open_object_section(it.first.c_str());
+    auto type = it.second;
+    f.dump_string("description", type.description);
+    if (!type.nick.empty()) {
+      f.dump_string("nick", type.nick);
+    }
+    f.dump_unsigned("type", type.type);
+    f.dump_unsigned("priority", type.priority);
+    f.dump_unsigned("units", type.unit);
+    f.close_section();
+  }
+  f.close_section();
+  return f.get();
+}
+
 void ActivePyModules::cluster_log(const std::string &channel, clog_type prio,
   const std::string &message)
 {

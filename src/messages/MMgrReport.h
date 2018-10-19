@@ -37,6 +37,14 @@ public:
   uint8_t priority = PerfCountersBuilder::PRIO_USEFUL;
   enum unit_t unit;
 
+  PerfCounterType() {
+  };
+
+  PerfCounterType(const std::string &path, const std::string &description,
+                  const std::string &nick, perfcounter_type_d type, unit_t unit)
+    : path(path), description(description), nick(nick), type(type), unit(unit) {
+  }
+
   void encode(bufferlist &bl) const
   {
     // TODO: decide whether to drop the per-type

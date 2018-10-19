@@ -18,6 +18,7 @@ set(mgr_srcs
   PyModuleRegistry.cc
   PyModuleRunner.cc
   PyOSDMap.cc
+  RBDPerfCounters.cc
   StandbyPyModules.cc
   mgr_commands.cc)
 add_executable(ceph-mgr ${mgr_srcs})

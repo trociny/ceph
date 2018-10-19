@@ -96,6 +96,20 @@ public:
                                           OSDPerfMetricHandler handler);
   void remove_osd_perf_query(OSDPerfMetricQueryID query_id);
 
+  PyObject *get_rbd_perf_counter_python(
+    int64_t pool_id, const std::string &image_id,
+    const std::string &counter_name);
+  PyObject *get_latest_rbd_perf_counter_python(
+    int64_t pool_id, const std::string &image_id,
+    const std::string &counter_name);
+  PyObject *get_rbd_perf_schema_python();
+  PyObject *with_rbd_perf_counters(
+      std::function<void(
+        PerfCounterInstance& counter_instance,
+        PerfCounterType& counter_type, PyFormatter& f)> fct,
+      int64_t pool_id, const std::string &image_id,
+      const std::string &counter_name) const;
+
   bool get_store(const std::string &module_name,
       const std::string &key, std::string *val) const;
   PyObject *get_store_prefix(const std::string &module_name,
