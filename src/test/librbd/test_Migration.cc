@@ -15,6 +15,8 @@
 #include "librbd/io/ImageRequestWQ.h"
 #include "librbd/io/ReadResult.h"
 
+#include <boost/scope_exit.hpp>
+
 void register_test_migration() {
 }
 
@@ -316,6 +318,19 @@ struct TestMigration : public TestFixture {
     librbd::NoOpProgressContext no_op;
     ASSERT_EQ(0, m_ref_ictx->operations->resize(size, true, no_op));
     ASSERT_EQ(0, m_ictx->operations->resize(size, true, no_op));
+  }
+
+  void read(const std::string &image_name, uint64_t off, uint64_t len,
+            bufferlist *bl) {
+    auto ictx = new librbd::ImageCtx(image_name.c_str(), "", nullptr, m_ioctx,
+                                     true);
+    open_image(m_ioctx, m_image_name, &ictx);
+
+    bufferptr ptr(len);
+    bl->push_back(ptr);
+    librbd::io::ReadResult result{bl};
+    ASSERT_EQ(static_cast<ssize_t>(len), ictx->io_work_queue->read(
+                off, len, librbd::io::ReadResult{result}, 0));
   }
 
   void test_no_snaps() {
@@ -1013,6 +1028,75 @@ TEST_F(TestMigration, SnapTrimBeforePrepare)
 
   migration_execute(m_ioctx, m_image_name);
   migration_commit(m_ioctx, m_image_name);
+}
+
+TEST_F(TestMigration, CloneV1Parent)
+{
+  REQUIRE_FEATURE(RBD_FEATURE_LAYERING);
+
+  std::string clone_format;
+  ASSERT_EQ(0, _rados.conf_get("rbd_default_clone_format", clone_format));
+  ASSERT_EQ(0, _rados.conf_set("rbd_default_clone_format", "1"));
+  BOOST_SCOPE_EXIT(&clone_format) {
+    _rados.conf_set("rbd_default_clone_format", clone_format.c_str());
+  } BOOST_SCOPE_EXIT_END;
+
+  write(0, 10, 'A');
+  snap_create("snap1");
+  snap_protect("snap1");
+
+  int order = m_ictx->order;
+  uint64_t features;
+  ASSERT_EQ(0, librbd::get_features(m_ictx, &features));
+  features &= ~RBD_FEATURES_IMPLICIT_ENABLE;
+
+  std::string clone_name = get_temp_image_name();
+  ASSERT_EQ(0, librbd::clone(m_ictx->md_ctx, m_ictx->name.c_str(), "snap1",
+                             m_ioctx, clone_name.c_str(), features, &order,
+                             m_ictx->stripe_unit, m_ictx->stripe_count));
+
+  migrate(m_ioctx, m_image_name);
+
+  bufferlist bl;
+  read(clone_name, 0, 10, &bl);
+
+  bufferlist ref_bl;
+  ref_bl.append(std::string(10, 'A'));
+  ASSERT_TRUE(ref_bl.contents_equal(bl));
+}
+
+TEST_F(TestMigration, CloneV2Parent)
+{
+  REQUIRE_FEATURE(RBD_FEATURE_LAYERING);
+
+  std::string clone_format;
+  ASSERT_EQ(0, _rados.conf_get("rbd_default_clone_format", clone_format));
+  ASSERT_EQ(0, _rados.conf_set("rbd_default_clone_format", "2"));
+  BOOST_SCOPE_EXIT(&clone_format) {
+    _rados.conf_set("rbd_default_clone_format", clone_format.c_str());
+  } BOOST_SCOPE_EXIT_END;
+
+  write(0, 10, 'A');
+  snap_create("snap1");
+
+  int order = m_ictx->order;
+  uint64_t features;
+  ASSERT_EQ(0, librbd::get_features(m_ictx, &features));
+  features &= ~RBD_FEATURES_IMPLICIT_ENABLE;
+
+  std::string clone_name = get_temp_image_name();
+  ASSERT_EQ(0, librbd::clone(m_ictx->md_ctx, m_ictx->name.c_str(), "snap1",
+                             m_ioctx, clone_name.c_str(), features, &order,
+                             m_ictx->stripe_unit, m_ictx->stripe_count));
+
+  migrate(m_ioctx, m_image_name);
+
+  bufferlist bl;
+  read(clone_name, 0, 10, &bl);
+
+  bufferlist ref_bl;
+  ref_bl.append(std::string(10, 'A'));
+  ASSERT_TRUE(ref_bl.contents_equal(bl));
 }
 
 TEST_F(TestMigration, StressNoMigrate)

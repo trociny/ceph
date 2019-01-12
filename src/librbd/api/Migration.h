@@ -82,6 +82,7 @@ private:
   int add_group(ImageCtxT *image_ctx, group_info_t &group_info);
   int update_group(ImageCtxT *from_image_ctx, ImageCtxT *to_image_ctx);
   int remove_migration(ImageCtxT *image_ctx);
+  int relink_children(ImageCtxT *from_image_ctx, ImageCtxT *to_image_ctx);
   int remove_src_image();
 
   int v1_set_migration();
@@ -90,6 +91,10 @@ private:
   int v2_unlink_src_image();
   int v1_relink_src_image();
   int v2_relink_src_image();
+
+  int relink_child(ImageCtxT *from_image_ctx, ImageCtxT *to_image_ctx,
+                   const librbd::snap_info_t &src_snap,
+                   const librbd::linked_image_spec_t &child_image);
 };
 
 } // namespace api
