@@ -1495,8 +1495,7 @@ int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
                                const librbd::linked_image_spec_t &child_image) {
   ldout(m_cct, 10) << src_snap.name << " " << child_image.pool_name << "/"
                    << child_image.pool_namespace << "/"
-                   << child_image.pool_name << "/" << child_image.image_name
-                   << dendl;
+                   << child_image.image_name << dendl;
 
   librados::snap_t dst_snap_id;
   {
@@ -1561,16 +1560,6 @@ int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
     clone_format = 2;
   }
 
-  C_SaferCond on_detach_child;
-  auto detach_child_req = image::DetachChildRequest<I>::create(
-      *child_image_ctx, &on_detach_child);
-  detach_child_req->send();
-  r = on_detach_child.wait();
-  if (r < 0) {
-    lderr(m_cct) << "failed to detach child: " << cpp_strerror(r) << dendl;
-    return r;
-  }
-
   C_SaferCond on_detach_parent;
   auto detach_parent_req = image::DetachParentRequest<I>::create(
       *child_image_ctx, &on_detach_parent);
@@ -1578,17 +1567,6 @@ int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
   r = on_detach_parent.wait();
   if (r < 0) {
     lderr(m_cct) << "failed to detach parent: " << cpp_strerror(r) << dendl;
-    return r;
-  }
-
-  C_SaferCond on_attach_child;
-  auto attach_child_req = image::AttachChildRequest<I>::create(
-      *child_image_ctx, *to_image_ctx, dst_snap_id, clone_format,
-      &on_attach_child);
-  attach_child_req->send();
-  r = on_attach_child.wait();
-  if (r < 0) {
-    lderr(m_cct) << "failed to attach child: " << cpp_strerror(r) << dendl;
     return r;
   }
 
@@ -1604,6 +1582,17 @@ int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
   r = on_attach_parent.wait();
   if (r < 0) {
     lderr(m_cct) << "failed to attach parent: " << cpp_strerror(r) << dendl;
+    return r;
+  }
+
+  C_SaferCond on_reattach_child;
+  auto reattach_child_req = image::AttachChildRequest<I>::create(
+      *child_image_ctx, *to_image_ctx, dst_snap_id, clone_format,
+      &on_reattach_child, from_image_ctx, src_snap.id);
+  reattach_child_req->send();
+  r = on_reattach_child.wait();
+  if (r < 0) {
+    lderr(m_cct) << "failed to re-attach child: " << cpp_strerror(r) << dendl;
     return r;
   }
 

@@ -22,15 +22,20 @@ public:
   static AttachChildRequest* create(ImageCtxT &image_ctx,
                                     ImageCtxT &parent_image_ctx,
                                     const librados::snap_t &parent_snap_id,
-                                    uint32_t clone_format, Context* on_finish) {
+                                    uint32_t clone_format, Context* on_finish,
+                                    ImageCtxT *old_parent_image_ctx=nullptr,
+                                    const librados::snap_t &old_parent_snap_id=0) {
       return new AttachChildRequest(image_ctx, parent_image_ctx, parent_snap_id,
-                                    clone_format, on_finish);
+                                    clone_format, on_finish,
+                                    old_parent_image_ctx, old_parent_snap_id);
   }
 
   AttachChildRequest(ImageCtxT &image_ctx,
                      ImageCtxT &parent_image_ctx,
                      const librados::snap_t &parent_snap_id,
-                     uint32_t clone_format, Context* on_finish);
+                     uint32_t clone_format, Context* on_finish,
+                     ImageCtxT *old_parent_image_ctx=nullptr,
+                     const librados::snap_t &old_parent_snap_id=0);
 
   void send();
 
@@ -48,6 +53,9 @@ private:
    *     v                          v
    *  V1 VALIDATE PROTECTED     V2 ATTACH CHILD
    *     |                          |
+   *     |                          v
+   *     |                      V2 DETACH CHILD FROM OLD PARENT
+   *     |                          |
    *     \------------\ /-----------/
    *                   |
    *                   v
@@ -61,6 +69,8 @@ private:
   librados::snap_t m_parent_snap_id;
   uint32_t m_clone_format = 2;
   Context* m_on_finish;
+  ImageCtxT *m_old_parent_image_ctx;
+  librados::snap_t m_old_parent_snap_id;
 
   CephContext *m_cct;
 
@@ -69,6 +79,9 @@ private:
 
   void v2_child_attach();
   void handle_v2_child_attach(int r);
+
+  void v2_child_detach_from_old_parent();
+  void handle_v2_child_detach_from_old_parent(int r);
 
   void v1_add_child();
   void handle_v1_add_child(int r);

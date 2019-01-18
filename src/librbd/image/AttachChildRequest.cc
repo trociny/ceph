@@ -24,10 +24,13 @@ template <typename I>
 AttachChildRequest<I>::AttachChildRequest(I &image_ctx, I &parent_image_ctx,
                                           const librados::snap_t &parent_snap_id,
                                           uint32_t clone_format,
-                                          Context* on_finish)
+                                          Context* on_finish,
+                                          I *old_parent_image_ctx,
+                                          const librados::snap_t &old_parent_snap_id)
     : m_image_ctx(image_ctx), m_parent_image_ctx(parent_image_ctx),
       m_parent_snap_id(parent_snap_id), m_clone_format(clone_format),
-      m_on_finish(on_finish), m_cct(m_image_ctx.cct) {
+      m_on_finish(on_finish), m_old_parent_image_ctx(old_parent_image_ctx),
+      m_old_parent_snap_id(old_parent_snap_id), m_cct(m_image_ctx.cct) {
 }
 
 template <typename I>
@@ -44,6 +47,12 @@ void AttachChildRequest<I>::v1_add_child() {
   ldout(m_cct, 15) << dendl;
 
   librados::ObjectWriteOperation op;
+  if (m_old_parent_image_ctx != nullptr) {
+    cls_client::remove_child(&op, {m_old_parent_image_ctx->md_ctx.get_id(),
+                                   m_old_parent_image_ctx->md_ctx.get_namespace(),
+                                   m_old_parent_image_ctx->id,
+                                   m_old_parent_snap_id}, m_image_ctx.id);
+  }
   cls_client::add_child(&op, {m_parent_image_ctx.md_ctx.get_id(),
                               m_parent_image_ctx.md_ctx.get_namespace(),
                               m_parent_image_ctx.id,
@@ -155,6 +164,44 @@ void AttachChildRequest<I>::handle_v2_child_attach(int r) {
 
   if (r < 0) {
     lderr(m_cct) << "failed to attach child image: " << cpp_strerror(r)
+                 << dendl;
+    finish(r);
+    return;
+  }
+
+  v2_child_detach_from_old_parent();
+}
+
+template <typename I>
+void AttachChildRequest<I>::v2_child_detach_from_old_parent() {
+  if (m_old_parent_image_ctx == nullptr) {
+    finish(0);
+    return;
+  }
+
+  ldout(m_cct, 15) << dendl;
+
+  librados::ObjectWriteOperation op;
+  cls_client::child_detach(&op, m_old_parent_snap_id,
+                           {m_image_ctx.md_ctx.get_id(),
+                            m_image_ctx.md_ctx.get_namespace(),
+                            m_image_ctx.id});
+
+  auto aio_comp = create_rados_callback<
+      AttachChildRequest<I>,
+      &AttachChildRequest<I>::handle_v2_child_detach_from_old_parent>(this);
+  int r = m_old_parent_image_ctx->md_ctx.aio_operate(
+      m_old_parent_image_ctx->header_oid, aio_comp, &op);
+  ceph_assert(r == 0);
+  aio_comp->release();
+}
+
+template <typename I>
+void AttachChildRequest<I>::handle_v2_child_detach_from_old_parent(int r) {
+  ldout(m_cct, 15) << "r=" << r << dendl;
+
+  if (r < 0) {
+    lderr(m_cct) << "failed to detach child image: " << cpp_strerror(r)
                  << dendl;
     finish(r);
     return;
