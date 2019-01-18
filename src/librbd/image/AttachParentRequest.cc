@@ -1,4 +1,4 @@
-// -*- mode:C++; tab-width:8; c-basic-offattach:2; indent-tabs-mode:t -*-
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
 #include "librbd/image/AttachParentRequest.h"
@@ -17,7 +17,6 @@
 namespace librbd {
 namespace image {
 
-using util::create_context_callback;
 using util::create_rados_callback;
 
 template <typename I>
