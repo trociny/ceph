@@ -1559,29 +1559,18 @@ int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
   if (child_image_ctx->test_op_features(RBD_OPERATION_FEATURE_CLONE_CHILD)) {
     clone_format = 2;
   }
-
-  C_SaferCond on_detach_parent;
-  auto detach_parent_req = image::DetachParentRequest<I>::create(
-      *child_image_ctx, &on_detach_parent);
-  detach_parent_req->send();
-  r = on_detach_parent.wait();
-  if (r < 0) {
-    lderr(m_cct) << "failed to detach parent: " << cpp_strerror(r) << dendl;
-    return r;
-  }
-
   parent_spec.pool_id = to_image_ctx->md_ctx.get_id();
   parent_spec.pool_namespace = to_image_ctx->md_ctx.get_namespace();
   parent_spec.image_id = to_image_ctx->id;
   parent_spec.snap_id = dst_snap_id;
 
-  C_SaferCond on_attach_parent;
-  auto attach_parent_req = image::AttachParentRequest<I>::create(
-      *child_image_ctx, parent_spec, parent_overlap, &on_attach_parent);
-  attach_parent_req->send();
-  r = on_attach_parent.wait();
+  C_SaferCond on_reattach_parent;
+  auto reattach_parent_req = image::AttachParentRequest<I>::create(
+      *child_image_ctx, parent_spec, parent_overlap, true, &on_reattach_parent);
+  reattach_parent_req->send();
+  r = on_reattach_parent.wait();
   if (r < 0) {
-    lderr(m_cct) << "failed to attach parent: " << cpp_strerror(r) << dendl;
+    lderr(m_cct) << "failed to re-attach parent: " << cpp_strerror(r) << dendl;
     return r;
   }
 
