@@ -32,7 +32,7 @@ void AttachParentRequest<I>::attach_parent() {
   librados::ObjectWriteOperation op;
   if (!m_legacy_parent) {
     librbd::cls_client::parent_attach(&op, m_parent_image_spec,
-                                      m_parent_overlap);
+                                      m_parent_overlap, m_reattach);
   } else {
     librbd::cls_client::set_parent(&op, m_parent_image_spec, m_parent_overlap);
   }
@@ -50,7 +50,7 @@ void AttachParentRequest<I>::handle_attach_parent(int r) {
   auto cct = m_image_ctx.cct;
   ldout(cct, 5) << dendl;
 
-  if (!m_legacy_parent && r == -EOPNOTSUPP) {
+  if (!m_legacy_parent && r == -EOPNOTSUPP && !m_reattach) {
     if (m_parent_image_spec.pool_namespace ==
           m_image_ctx.md_ctx.get_namespace()) {
       m_parent_image_spec.pool_namespace = "";
