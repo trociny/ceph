@@ -54,9 +54,11 @@ struct AttachChildRequest<MockTestImageCtx> {
   uint32_t clone_format;
   Context* on_finish = nullptr;
   static AttachChildRequest* s_instance;
-  static AttachChildRequest* create(MockTestImageCtx&,
-                                    MockTestImageCtx&,
-                                    const librados::snap_t&,
+  static AttachChildRequest* create(MockTestImageCtx *,
+                                    MockTestImageCtx *,
+                                    const librados::snap_t &,
+                                    MockTestImageCtx *,
+                                    const librados::snap_t &,
                                     uint32_t clone_format,
                                     Context *on_finish) {
     ceph_assert(s_instance != nullptr);

@@ -367,8 +367,8 @@ void CloneRequest<I>::attach_child() {
   auto ctx = create_context_callback<
     CloneRequest<I>, &CloneRequest<I>::handle_attach_child>(this);
   auto req = AttachChildRequest<I>::create(
-    *m_imctx, *m_parent_image_ctx, m_parent_image_ctx->snap_id, m_clone_format,
-    ctx);
+    m_imctx, m_parent_image_ctx, m_parent_image_ctx->snap_id, nullptr, 0,
+    m_clone_format, ctx);
   req->send();
 }
 

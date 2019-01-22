@@ -39,6 +39,15 @@
 #define dout_prefix *_dout << "librbd::Migration: " << __func__ << ": "
 
 namespace librbd {
+
+inline bool operator==(const linked_image_spec_t& rhs,
+                       const linked_image_spec_t& lhs) {
+  bool result = (rhs.pool_id == lhs.pool_id &&
+                 rhs.pool_namespace == lhs.pool_namespace &&
+                 rhs.image_id == lhs.image_id);
+  return result;
+}
+
 namespace api {
 
 using util::create_rados_callback;
@@ -797,7 +806,8 @@ int Migration<I>::abort() {
 
     for (auto &snap : snaps) {
       librbd::NoOpProgressContext prog_ctx;
-      int r = snap_remove(dst_image_ctx, snap.name.c_str(), 0, prog_ctx);
+      int r = snap_remove(dst_image_ctx, snap.name.c_str(),
+                          RBD_SNAP_REMOVE_UNPROTECT, prog_ctx);
       if (r < 0) {
         lderr(m_cct) << "failed removing snapshot: " << cpp_strerror(r)
                      << dendl;
@@ -1439,6 +1449,26 @@ int Migration<I>::enable_mirroring(I *image_ctx, bool was_enabled) {
   return 0;
 }
 
+// When relinking children we should be careful as it my be interrupted
+// at any moment by some reason and we may end up in an inconsistent
+// state, which we have to be able to fix with "migration abort". Below
+// are all possible states during migration (P1 - sourse parent, P2 -
+// destination parent, C - child):
+//
+//   P1  P2    P1  P2    P1  P2    P1  P2
+//   ^\         \  ^      \ /^        /^
+//    \v         v/        v/        v/
+//     C         C         C         C
+//
+//     1         2         3         4
+//
+// (1) and (4) are the initial and the final consistent states. (2)
+// and (3) are intermediate inconsistent states that have to be fixed
+// by relink_children running in "migration abort" mode. For this, it
+// scans P2 for all children attached and relinks (fixes) states (3)
+// and (4) to state (1). Then it scans P1 for remaining children and
+// fixes the states (2).
+
 template <typename I>
 int Migration<I>::relink_children(I *from_image_ctx, I *to_image_ctx) {
   ldout(m_cct, 10) << dendl;
@@ -1449,14 +1479,34 @@ int Migration<I>::relink_children(I *from_image_ctx, I *to_image_ctx) {
     return r;
   }
 
+  bool migration_abort = (to_image_ctx == m_src_image_ctx);
+
   for (auto it = snaps.begin(); it != snaps.end(); it++) {
     auto &snap = *it;
+    std::vector<librbd::linked_image_spec_t> src_child_images;
 
     if (from_image_ctx != m_src_image_ctx) {
+      ceph_assert(migration_abort);
+      
       // We always run list_snaps against the src image to get only
       // those snapshots that are migrated. If the "from" image is not
       // the src image (abort migration case), we need to remap snap ids.
+      // Also collect the list of the children currently attached to the
+      // source, so we could make a proper decision later about relinking.
 
+      RWLock::RLocker src_snap_locker(to_image_ctx->snap_lock);
+      cls::rbd::ParentImageSpec src_parent_spec{to_image_ctx->md_ctx.get_id(),
+                                                to_image_ctx->md_ctx.get_namespace(),
+                                                to_image_ctx->id, snap.id};
+      r = api::Image<I>::list_children(to_image_ctx, src_parent_spec,
+                                       &src_child_images);
+      if (r < 0) {
+        lderr(m_cct) << "failed listing children: " << cpp_strerror(r)
+                     << dendl;
+        return r;
+      }
+
+      RWLock::RLocker snap_locker(from_image_ctx->snap_lock);
       snap.id = from_image_ctx->get_snap_id(cls::rbd::UserSnapshotNamespace(),
                                             snap.name);
       if (snap.id == CEPH_NOSNAP) {
@@ -1465,21 +1515,36 @@ int Migration<I>::relink_children(I *from_image_ctx, I *to_image_ctx) {
       }
     }
 
-    RWLock::RLocker snap_locker(from_image_ctx->snap_lock);
-    cls::rbd::ParentImageSpec parent_spec{from_image_ctx->md_ctx.get_id(),
-                                          from_image_ctx->md_ctx.get_namespace(),
-                                          from_image_ctx->id, snap.id};
     std::vector<librbd::linked_image_spec_t> child_images;
-    r = api::Image<I>::list_children(from_image_ctx, parent_spec,
-                                     &child_images);
-    if (r < 0) {
-      lderr(m_cct) << "failed listing children: " << cpp_strerror(r)
-                   << dendl;
-      return r;
+    {
+      RWLock::RLocker snap_locker(from_image_ctx->snap_lock);
+      cls::rbd::ParentImageSpec parent_spec{from_image_ctx->md_ctx.get_id(),
+                                            from_image_ctx->md_ctx.get_namespace(),
+                                            from_image_ctx->id, snap.id};
+      r = api::Image<I>::list_children(from_image_ctx, parent_spec,
+                                       &child_images);
+      if (r < 0) {
+        lderr(m_cct) << "failed listing children: " << cpp_strerror(r)
+                     << dendl;
+        return r;
+      }
     }
 
     for (auto &child_image : child_images) {
-      r = relink_child(from_image_ctx, to_image_ctx, snap, child_image);
+      r = relink_child(from_image_ctx, to_image_ctx, snap, child_image,
+                       migration_abort, true);
+      if (r < 0) {
+        return r;
+      }
+
+      src_child_images.erase(std::remove(src_child_images.begin(),
+                                         src_child_images.end(), child_image),
+                             src_child_images.end());
+    }
+
+    for (auto &child_image : src_child_images) {
+      r = relink_child(from_image_ctx, to_image_ctx, snap, child_image,
+                       migration_abort, false);
       if (r < 0) {
         return r;
       }
@@ -1491,19 +1556,22 @@ int Migration<I>::relink_children(I *from_image_ctx, I *to_image_ctx) {
 
 template <typename I>
 int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
-                               const librbd::snap_info_t &src_snap,
-                               const librbd::linked_image_spec_t &child_image) {
-  ldout(m_cct, 10) << src_snap.name << " " << child_image.pool_name << "/"
+                               const librbd::snap_info_t &from_snap,
+                               const librbd::linked_image_spec_t &child_image,
+                               bool migration_abort, bool reattach_child) {
+  ldout(m_cct, 10) << from_snap.name << " " << child_image.pool_name << "/"
                    << child_image.pool_namespace << "/"
-                   << child_image.image_name << dendl;
+                   << child_image.image_name << " (migration_abort="
+                   << migration_abort << ", reattach_child=" << reattach_child
+                   << ")" << dendl;
 
-  librados::snap_t dst_snap_id;
+  librados::snap_t to_snap_id;
   {
     RWLock::RLocker snap_locker(to_image_ctx->snap_lock);
-    dst_snap_id = to_image_ctx->get_snap_id(cls::rbd::UserSnapshotNamespace(),
-                                             src_snap.name);
-    if (dst_snap_id == CEPH_NOSNAP) {
-      lderr(m_cct) << "no snapshot " << src_snap.name << " on destination image"
+    to_snap_id = to_image_ctx->get_snap_id(cls::rbd::UserSnapshotNamespace(),
+                                             from_snap.name);
+    if (to_snap_id == CEPH_NOSNAP) {
+      lderr(m_cct) << "no snapshot " << from_snap.name << " on destination image"
                    << dendl;
       return -ENOENT;
     }
@@ -1529,6 +1597,11 @@ int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
     child_image_ctx->state->close();
   } BOOST_SCOPE_EXIT_END;
 
+  uint32_t clone_format = 1;
+  if (child_image_ctx->test_op_features(RBD_OPERATION_FEATURE_CLONE_CHILD)) {
+    clone_format = 2;
+  }
+
   cls::rbd::ParentImageSpec parent_spec;
   uint64_t parent_overlap;
   {
@@ -1545,44 +1618,51 @@ int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
     }
   }
 
-  if (parent_spec.pool_id != from_image_ctx->md_ctx.get_id() ||
-      parent_spec.pool_namespace != from_image_ctx->md_ctx.get_namespace() ||
-      parent_spec.image_id != from_image_ctx->id ||
-      parent_spec.snap_id != src_snap.id) {
-    lderr(m_cct) << "parent is not source image: " << parent_spec.pool_id << "/"
-                 << parent_spec.pool_namespace << "/" << parent_spec.image_id
-                 << "@" << parent_spec.snap_id << dendl;
-    return -ESTALE;
-  }
+  if (migration_abort &&
+      parent_spec.pool_id == to_image_ctx->md_ctx.get_id() &&
+      parent_spec.pool_namespace == to_image_ctx->md_ctx.get_namespace() &&
+      parent_spec.image_id == to_image_ctx->id &&
+      parent_spec.snap_id == to_snap_id) {
+    ldout(m_cct, 10) << "no need for parent re-attach" << dendl;
+  } else {
+    if (parent_spec.pool_id != from_image_ctx->md_ctx.get_id() ||
+        parent_spec.pool_namespace != from_image_ctx->md_ctx.get_namespace() ||
+        parent_spec.image_id != from_image_ctx->id ||
+        parent_spec.snap_id != from_snap.id) {
+      lderr(m_cct) << "parent is not source image: " << parent_spec.pool_id
+                   << "/" << parent_spec.pool_namespace << "/"
+                   << parent_spec.image_id << "@" << parent_spec.snap_id
+                   << dendl;
+      return -ESTALE;
+    }
 
-  uint32_t clone_format = 1;
-  if (child_image_ctx->test_op_features(RBD_OPERATION_FEATURE_CLONE_CHILD)) {
-    clone_format = 2;
-  }
-  parent_spec.pool_id = to_image_ctx->md_ctx.get_id();
-  parent_spec.pool_namespace = to_image_ctx->md_ctx.get_namespace();
-  parent_spec.image_id = to_image_ctx->id;
-  parent_spec.snap_id = dst_snap_id;
+    parent_spec.pool_id = to_image_ctx->md_ctx.get_id();
+    parent_spec.pool_namespace = to_image_ctx->md_ctx.get_namespace();
+    parent_spec.image_id = to_image_ctx->id;
+    parent_spec.snap_id = to_snap_id;
 
-  C_SaferCond on_reattach_parent;
-  auto reattach_parent_req = image::AttachParentRequest<I>::create(
+    C_SaferCond on_reattach_parent;
+    auto reattach_parent_req = image::AttachParentRequest<I>::create(
       *child_image_ctx, parent_spec, parent_overlap, true, &on_reattach_parent);
-  reattach_parent_req->send();
-  r = on_reattach_parent.wait();
-  if (r < 0) {
-    lderr(m_cct) << "failed to re-attach parent: " << cpp_strerror(r) << dendl;
-    return r;
+    reattach_parent_req->send();
+    r = on_reattach_parent.wait();
+    if (r < 0) {
+      lderr(m_cct) << "failed to re-attach parent: " << cpp_strerror(r) << dendl;
+      return r;
+    }
   }
 
-  C_SaferCond on_reattach_child;
-  auto reattach_child_req = image::AttachChildRequest<I>::create(
-      *child_image_ctx, *to_image_ctx, dst_snap_id, clone_format,
-      &on_reattach_child, from_image_ctx, src_snap.id);
-  reattach_child_req->send();
-  r = on_reattach_child.wait();
-  if (r < 0) {
-    lderr(m_cct) << "failed to re-attach child: " << cpp_strerror(r) << dendl;
-    return r;
+  if (reattach_child) {
+    C_SaferCond on_reattach_child;
+    auto reattach_child_req = image::AttachChildRequest<I>::create(
+      child_image_ctx, to_image_ctx, to_snap_id, from_image_ctx, from_snap.id,
+      clone_format, &on_reattach_child);
+    reattach_child_req->send();
+    r = on_reattach_child.wait();
+    if (r < 0) {
+      lderr(m_cct) << "failed to re-attach child: " << cpp_strerror(r) << dendl;
+      return r;
+    }
   }
 
   return 0;

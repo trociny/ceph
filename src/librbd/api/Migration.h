@@ -94,7 +94,8 @@ private:
 
   int relink_child(ImageCtxT *from_image_ctx, ImageCtxT *to_image_ctx,
                    const librbd::snap_info_t &src_snap,
-                   const librbd::linked_image_spec_t &child_image);
+                   const librbd::linked_image_spec_t &child_image,
+                   bool migration_abort, bool reattach_child);
 };
 
 } // namespace api

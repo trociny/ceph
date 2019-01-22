@@ -150,8 +150,9 @@ TEST_F(TestMockImageAttachChildRequest, SuccessV1) {
   expect_is_snap_protected(mock_image_ctx, true, 0);
 
   C_SaferCond ctx;
-  auto req = MockAttachChildRequest::create(mock_image_ctx, mock_image_ctx,
-                                            image_ctx->snap_id, 1, &ctx);
+  auto req = MockAttachChildRequest::create(&mock_image_ctx, &mock_image_ctx,
+                                            image_ctx->snap_id, nullptr, 0, 1,
+                                            &ctx);
   req->send();
   ASSERT_EQ(0, ctx.wait());
 }
@@ -167,8 +168,9 @@ TEST_F(TestMockImageAttachChildRequest, SuccessV2) {
   expect_child_attach(mock_image_ctx, 0);
 
   C_SaferCond ctx;
-  auto req = MockAttachChildRequest::create(mock_image_ctx, mock_image_ctx,
-                                            image_ctx->snap_id, 2, &ctx);
+  auto req = MockAttachChildRequest::create(&mock_image_ctx, &mock_image_ctx,
+                                            image_ctx->snap_id, nullptr, 0, 2,
+                                            &ctx);
   req->send();
   ASSERT_EQ(0, ctx.wait());
 }
@@ -183,8 +185,9 @@ TEST_F(TestMockImageAttachChildRequest, AddChildError) {
   expect_add_child(mock_image_ctx, -EINVAL);
 
   C_SaferCond ctx;
-  auto req = MockAttachChildRequest::create(mock_image_ctx, mock_image_ctx,
-                                            image_ctx->snap_id, 1, &ctx);
+  auto req = MockAttachChildRequest::create(&mock_image_ctx, &mock_image_ctx,
+                                            image_ctx->snap_id, nullptr, 0, 1,
+                                            &ctx);
   req->send();
   ASSERT_EQ(-EINVAL, ctx.wait());
 }
@@ -202,8 +205,9 @@ TEST_F(TestMockImageAttachChildRequest, RefreshError) {
   expect_refresh(mock_refresh_request, -EINVAL);
 
   C_SaferCond ctx;
-  auto req = MockAttachChildRequest::create(mock_image_ctx, mock_image_ctx,
-                                            image_ctx->snap_id, 1, &ctx);
+  auto req = MockAttachChildRequest::create(&mock_image_ctx, &mock_image_ctx,
+                                            image_ctx->snap_id, nullptr, 0, 1,
+                                            &ctx);
   req->send();
   ASSERT_EQ(-EINVAL, ctx.wait());
 }
@@ -222,8 +226,9 @@ TEST_F(TestMockImageAttachChildRequest, ValidateProtectedFailed) {
   expect_is_snap_protected(mock_image_ctx, false, 0);
 
   C_SaferCond ctx;
-  auto req = MockAttachChildRequest::create(mock_image_ctx, mock_image_ctx,
-                                            image_ctx->snap_id, 1, &ctx);
+  auto req = MockAttachChildRequest::create(&mock_image_ctx, &mock_image_ctx,
+                                            image_ctx->snap_id, nullptr, 0, 1,
+                                            &ctx);
   req->send();
   ASSERT_EQ(-EINVAL, ctx.wait());
 }
@@ -238,8 +243,9 @@ TEST_F(TestMockImageAttachChildRequest, SetCloneError) {
   expect_op_features_set(mock_image_ctx, -EINVAL);
 
   C_SaferCond ctx;
-  auto req = MockAttachChildRequest::create(mock_image_ctx, mock_image_ctx,
-                                            image_ctx->snap_id, 2, &ctx);
+  auto req = MockAttachChildRequest::create(&mock_image_ctx, &mock_image_ctx,
+                                            image_ctx->snap_id, nullptr, 0, 2,
+                                            &ctx);
   req->send();
   ASSERT_EQ(-EINVAL, ctx.wait());
 }
@@ -255,8 +261,9 @@ TEST_F(TestMockImageAttachChildRequest, AttachChildError) {
   expect_child_attach(mock_image_ctx, -EINVAL);
 
   C_SaferCond ctx;
-  auto req = MockAttachChildRequest::create(mock_image_ctx, mock_image_ctx,
-                                            image_ctx->snap_id, 2, &ctx);
+  auto req = MockAttachChildRequest::create(&mock_image_ctx, &mock_image_ctx,
+                                            image_ctx->snap_id, nullptr, 0, 2,
+                                            &ctx);
   req->send();
   ASSERT_EQ(-EINVAL, ctx.wait());
 }
