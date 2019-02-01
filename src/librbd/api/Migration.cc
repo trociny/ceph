@@ -1665,6 +1665,8 @@ int Migration<I>::relink_child(I *from_image_ctx, I *to_image_ctx,
     }
   }
 
+  child_image_ctx->notify_update();
+
   return 0;
 }
 

@@ -157,7 +157,8 @@ int init(const std::string &pool_name, const std::string& namespace_name,
          librados::Rados *rados, librados::IoCtx *io_ctx);
 int init_io_ctx(librados::Rados &rados, const std::string &pool_name,
                 const std::string& namespace_name, librados::IoCtx *io_ctx);
-
+int set_namespace(const std::string& namespace_name, librados::IoCtx *io_ctx);
+  
 void disable_cache();
 
 int open_image(librados::IoCtx &io_ctx, const std::string &image_name,
