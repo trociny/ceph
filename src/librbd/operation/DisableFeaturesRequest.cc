@@ -14,6 +14,7 @@
 #include "librbd/io/ImageRequestWQ.h"
 #include "librbd/journal/RemoveRequest.h"
 #include "librbd/mirror/DisableRequest.h"
+#include "librbd/mirror/EnableRequest.h"
 #include "librbd/object_map/RemoveRequest.h"
 
 #define dout_subsys ceph_subsys_rbd
@@ -293,6 +294,11 @@ Context *DisableFeaturesRequest<I>::handle_get_mirror_image(int *result) {
   CephContext *cct = image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << dendl;
 
+  if (*result == -ENOENT) {
+    send_close_journal();
+    return nullptr;
+  }
+
   cls::rbd::MirrorImage mirror_image;
 
   if (*result == 0) {
@@ -300,17 +306,9 @@ Context *DisableFeaturesRequest<I>::handle_get_mirror_image(int *result) {
     *result = cls_client::mirror_image_get_finish(&it, &mirror_image);
   }
 
-  if (*result < 0 && *result != -ENOENT) {
+  if (*result < 0) {
     lderr(cct) << "failed to retrieve pool mirror image: "
                << cpp_strerror(*result) << dendl;
-    return handle_finish(*result);
-  }
-
-  if (mirror_image.state == cls::rbd::MIRROR_IMAGE_STATE_ENABLED && !m_force) {
-    lderr(cct) << "cannot disable journaling: image mirroring "
-               << "enabled and mirror pool mode set to image"
-               << dendl;
-    *result = -EINVAL;
     return handle_finish(*result);
   }
 
@@ -344,6 +342,8 @@ Context *DisableFeaturesRequest<I>::handle_disable_mirror_image(int *result) {
     lderr(cct) << "failed to disable image mirroring: " << cpp_strerror(*result)
                << dendl;
     // not fatal
+  } else if (m_mirror_mode == cls::rbd::MIRROR_MODE_IMAGE) {
+    m_enable_mirroring = true;
   }
 
   send_close_journal();
@@ -540,7 +540,7 @@ void DisableFeaturesRequest<I>::send_update_flags() {
   CephContext *cct = image_ctx.cct;
 
   if (m_disable_flags == 0) {
-    send_notify_update();
+    send_enable_mirror_image();
     return;
   }
 
@@ -566,6 +566,42 @@ Context *DisableFeaturesRequest<I>::handle_update_flags(int *result) {
     lderr(cct) << "failed to update image flags: " << cpp_strerror(*result)
                << dendl;
     return handle_finish(*result);
+  }
+
+  send_enable_mirror_image();
+  return nullptr;
+}
+
+template <typename I>
+void DisableFeaturesRequest<I>::send_enable_mirror_image() {
+  I &image_ctx = this->m_image_ctx;
+  CephContext *cct = image_ctx.cct;
+
+  if (!m_enable_mirroring) {
+    send_notify_update();
+    return;
+  }
+
+  ldout(cct, 20) << this << " " << __func__ << dendl;
+
+  Context *ctx = create_context_callback<
+    DisableFeaturesRequest<I>,
+    &DisableFeaturesRequest<I>::handle_enable_mirror_image>(this);
+
+  auto req = mirror::EnableRequest<I>::create(&image_ctx, ctx);
+  req->send();
+}
+
+template <typename I>
+Context *DisableFeaturesRequest<I>::handle_enable_mirror_image(int *result) {
+  I &image_ctx = this->m_image_ctx;
+  CephContext *cct = image_ctx.cct;
+  ldout(cct, 20) << this << " " << __func__ << ": r=" << *result << dendl;
+
+  if (*result < 0) {
+    lderr(cct) << "failed to enable image mirroring: " << cpp_strerror(*result)
+               << dendl;
+    // not fatal
   }
 
   send_notify_update();

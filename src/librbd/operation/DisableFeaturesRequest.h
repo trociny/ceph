@@ -56,15 +56,15 @@ private:
    *    v
    * STATE_ACQUIRE_EXCLUSIVE_LOCK (skip if not
    *    |                          required)
-   *    | (disbling journaling)
-   *    \-------------------\
+   *    | (disabling journaling)
+   *    \--------------------\
    *    |                    |
-   *    |                    V
-   *    |                 STATE_GET_MIRROR_MODE
-   *    |(not                |
-   *    | disabling          v
-   *    | journaling)     STATE_GET_MIRROR_IMAGE
-   *    |                    |
+   *    |(not                v
+   *    | disabling       STATE_GET_MIRROR_MODE
+   *    | journaling)        |
+   *    |                    v
+   *    |                 STATE_GET_MIRROR_IMAGE (skip if not
+   *    |                    |                    required)
    *    |                    v
    *    |                 STATE_DISABLE_MIRROR_IMAGE (skip if not
    *    |                    |                        required)
@@ -89,6 +89,9 @@ private:
    * STATE_UPDATE_FLAGS
    *    |
    *    v
+   * STATE_ENABLE_MIRROR_IMAGE (skip if not
+   *    |                       required)
+   *    v
    * STATE_NOTIFY_UPDATE
    *    |
    *    v
@@ -109,6 +112,7 @@ private:
   bool m_writes_blocked = false;
   bool m_image_lock_acquired = false;
   bool m_requests_blocked = false;
+  bool m_enable_mirroring = false;
 
   uint64_t m_new_features = 0;
   uint64_t m_disable_flags = 0;
@@ -141,6 +145,9 @@ private:
 
   void send_remove_journal();
   Context *handle_remove_journal(int *result);
+
+  void send_enable_mirror_image();
+  Context *handle_enable_mirror_image(int *result);
 
   void send_append_op_event();
   Context *handle_append_op_event(int *result);

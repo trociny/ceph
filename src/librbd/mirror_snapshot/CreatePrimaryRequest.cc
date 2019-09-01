@@ -92,7 +92,8 @@ void CreatePrimaryRequest<I>::handle_get_mirror_image(int r) {
     return;
   }
 
-  if (mirror_image.state != cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT) {
+  if (mirror_image.mode != cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT ||
+      mirror_image.state != cls::rbd::MIRROR_IMAGE_STATE_ENABLED) {
     lderr(cct) << "snapshot based mirroring is not enabled" << dendl;
     finish(-EINVAL);
     return;

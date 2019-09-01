@@ -158,14 +158,6 @@ public:
     ASSERT_EQ(mirror_state == RBD_MIRROR_IMAGE_ENABLED ? -ENOENT : -EINVAL,
               image.mirror_image_get_instance_id(&instance_id));
 
-    if (mirror_mode == RBD_MIRROR_MODE_IMAGE &&
-        mirror_state == RBD_MIRROR_IMAGE_DISABLED) {
-      // disabling image mirroring automatically disables journaling feature
-      uint64_t new_features;
-      ASSERT_EQ(0, image.features(&new_features));
-      ASSERT_EQ(0, new_features & RBD_FEATURE_JOURNALING);
-    }
-
     ASSERT_EQ(0, image.close());
     ASSERT_EQ(0, m_rbd.remove(m_ioctx, image_name.c_str()));
     ASSERT_EQ(0, m_rbd.mirror_mode_set(m_ioctx, RBD_MIRROR_MODE_DISABLED));
@@ -634,6 +626,15 @@ TEST_F(TestMirroring, EnableJournaling_In_MirrorModeImage) {
                       RBD_MIRROR_MODE_IMAGE, RBD_MIRROR_IMAGE_DISABLED);
 }
 
+TEST_F(TestMirroring, EnableJournaling_In_MirrorModeImage_MirroringEnabled) {
+  uint64_t init_features = 0;
+  init_features |= RBD_FEATURE_OBJECT_MAP;
+  init_features |= RBD_FEATURE_EXCLUSIVE_LOCK;
+  uint64_t features = RBD_FEATURE_JOURNALING;
+  check_mirroring_on_update_features(init_features, true, true, features, 0,
+                      RBD_MIRROR_MODE_IMAGE, RBD_MIRROR_IMAGE_ENABLED);
+}
+
 TEST_F(TestMirroring, EnableJournaling_In_MirrorModePool) {
   uint64_t init_features = 0;
   init_features |= RBD_FEATURE_OBJECT_MAP;
@@ -659,7 +660,7 @@ TEST_F(TestMirroring, DisableJournaling_In_MirrorModeImage) {
   init_features |= RBD_FEATURE_EXCLUSIVE_LOCK;
   init_features |= RBD_FEATURE_JOURNALING;
   uint64_t features = RBD_FEATURE_JOURNALING;
-  check_mirroring_on_update_features(init_features, false, true, features, -EINVAL,
+  check_mirroring_on_update_features(init_features, false, true, features, 0,
                       RBD_MIRROR_MODE_IMAGE, RBD_MIRROR_IMAGE_ENABLED);
 }
 

@@ -178,7 +178,8 @@ TEST_F(TestMockMirrorSnapshotCreatePrimaryRequest, Success) {
 
   expect_refresh_image(mock_image_ctx, true, 0);
   expect_get_mirror_image(
-    mock_image_ctx, {"gid", cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT}, 0);
+    mock_image_ctx, {cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT, "gid",
+                     cls::rbd::MIRROR_IMAGE_STATE_ENABLED}, 0);
   expect_get_mirror_peers(mock_image_ctx,
                           {{"uuid", cls::rbd::MIRROR_PEER_DIRECTION_TX, "ceph",
                             "mirror", "fsid"}}, 0);
@@ -222,8 +223,8 @@ TEST_F(TestMockMirrorSnapshotCreatePrimaryRequest, GetMirrorImageError) {
 
   expect_refresh_image(mock_image_ctx, false, 0);
   expect_get_mirror_image(
-    mock_image_ctx, {"gid", cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT},
-    -EINVAL);
+    mock_image_ctx, {cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT, "gid",
+                     cls::rbd::MIRROR_IMAGE_STATE_ENABLED}, -EINVAL);
 
   C_SaferCond ctx;
   auto req = new MockCreatePrimaryRequest(&mock_image_ctx, false, false,
@@ -244,7 +245,8 @@ TEST_F(TestMockMirrorSnapshotCreatePrimaryRequest, GetMirrorPeersError) {
 
   expect_refresh_image(mock_image_ctx, true, 0);
   expect_get_mirror_image(
-    mock_image_ctx, {"gid", cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT}, 0);
+    mock_image_ctx, {cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT, "gid",
+                     cls::rbd::MIRROR_IMAGE_STATE_ENABLED}, 0);
   expect_get_mirror_peers(mock_image_ctx,
                           {{"uuid", cls::rbd::MIRROR_PEER_DIRECTION_TX, "ceph",
                             "mirror", "fsid"}}, -EINVAL);
@@ -268,7 +270,8 @@ TEST_F(TestMockMirrorSnapshotCreatePrimaryRequest, CreateSnapshotError) {
 
   expect_refresh_image(mock_image_ctx, true, 0);
   expect_get_mirror_image(
-    mock_image_ctx, {"gid", cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT}, 0);
+    mock_image_ctx, {cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT, "gid",
+                     cls::rbd::MIRROR_IMAGE_STATE_ENABLED}, 0);
   expect_get_mirror_peers(mock_image_ctx,
                           {{"uuid", cls::rbd::MIRROR_PEER_DIRECTION_TX, "ceph",
                             "mirror", "fsid"}}, 0);
@@ -295,7 +298,8 @@ TEST_F(TestMockMirrorSnapshotCreatePrimaryRequest, ValidateErrorNonPrimaryNotCop
 
   expect_refresh_image(mock_image_ctx, false, 0);
   expect_get_mirror_image(
-    mock_image_ctx, {"gid", cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT}, 0);
+    mock_image_ctx, {cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT, "gid",
+                     cls::rbd::MIRROR_IMAGE_STATE_ENABLED}, 0);
 
   C_SaferCond ctx;
   auto req = new MockCreatePrimaryRequest(&mock_image_ctx, false, true, nullptr,
@@ -318,7 +322,8 @@ TEST_F(TestMockMirrorSnapshotCreatePrimaryRequest, ValidateErrorDemotedNonPrimar
 
   expect_refresh_image(mock_image_ctx, false, 0);
   expect_get_mirror_image(
-    mock_image_ctx, {"gid", cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT}, 0);
+    mock_image_ctx, {cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT, "gid",
+                     cls::rbd::MIRROR_IMAGE_STATE_ENABLED}, 0);
 
   C_SaferCond ctx;
   auto req = new MockCreatePrimaryRequest(&mock_image_ctx, true, true, nullptr,
@@ -341,7 +346,8 @@ TEST_F(TestMockMirrorSnapshotCreatePrimaryRequest, ValidateDemotedPrimary) {
 
   expect_refresh_image(mock_image_ctx, true, 0);
   expect_get_mirror_image(
-    mock_image_ctx, {"gid", cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT}, 0);
+    mock_image_ctx, {cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT, "gid",
+                     cls::rbd::MIRROR_IMAGE_STATE_ENABLED}, 0);
   expect_get_mirror_peers(mock_image_ctx,
                           {{"uuid", cls::rbd::MIRROR_PEER_DIRECTION_TX, "ceph",
                             "mirror", "fsid"}}, 0);
@@ -371,7 +377,8 @@ TEST_F(TestMockMirrorSnapshotCreatePrimaryRequest, SuccessUnlinkPeer) {
 
   expect_refresh_image(mock_image_ctx, true, 0);
   expect_get_mirror_image(
-    mock_image_ctx, {"gid", cls::rbd::MIRROR_IMAGE_STATE_ENABLED_SNAPSHOT}, 0);
+    mock_image_ctx, {cls::rbd::MIRROR_IMAGE_MODE_SNAPSHOT, "gid",
+                     cls::rbd::MIRROR_IMAGE_STATE_ENABLED}, 0);
   expect_get_mirror_peers(mock_image_ctx,
                           {{"uuid", cls::rbd::MIRROR_PEER_DIRECTION_TX, "ceph",
                             "mirror", "fsid"}}, 0);
