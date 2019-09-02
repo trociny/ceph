@@ -88,18 +88,34 @@ int do_list_snaps(librbd::Image& image, Formatter *f, bool all_snaps, librados::
     case RBD_SNAP_NAMESPACE_TYPE_TRASH:
       snap_namespace_name = "trash";
       break;
+    case RBD_SNAP_NAMESPACE_TYPE_MIRROR_PRIMARY:
+      snap_namespace_name = "mirror_primary";
+      break;
+    case RBD_SNAP_NAMESPACE_TYPE_MIRROR_NON_PRIMARY:
+      snap_namespace_name = "mirror_non_primary";
+      break;
     }
 
     int get_trash_res = -ENOENT;
     std::string trash_original_name;
     int get_group_res = -ENOENT;
     librbd::snap_group_namespace_t group_snap;
+    int get_mirror_primary_res = -ENOENT;
+    librbd::snap_mirror_primary_namespace_t mirror_primary_snap;
+    int get_mirror_non_primary_res = -ENOENT;
+    librbd::snap_mirror_non_primary_namespace_t mirror_non_primary_snap;
     if (snap_namespace == RBD_SNAP_NAMESPACE_TYPE_GROUP) {
       get_group_res = image.snap_get_group_namespace(s->id, &group_snap,
                                                      sizeof(group_snap));
     } else if (snap_namespace == RBD_SNAP_NAMESPACE_TYPE_TRASH) {
       get_trash_res = image.snap_get_trash_namespace(
         s->id, &trash_original_name);
+    } else if (snap_namespace == RBD_SNAP_NAMESPACE_TYPE_MIRROR_PRIMARY) {
+      get_mirror_primary_res = image.snap_get_mirror_primary_namespace(
+        s->id, &mirror_primary_snap, sizeof(mirror_primary_snap));
+    } else if (snap_namespace == RBD_SNAP_NAMESPACE_TYPE_MIRROR_NON_PRIMARY) {
+      get_mirror_non_primary_res = image.snap_get_mirror_non_primary_namespace(
+        s->id, &mirror_non_primary_snap, sizeof(mirror_non_primary_snap));
     }
 
     std::string protected_str = "";
@@ -129,6 +145,21 @@ int do_list_snaps(librbd::Image& image, Formatter *f, bool all_snaps, librados::
 	  f->dump_string("group snap", group_snap.group_snap_name);
 	} else if (get_trash_res == 0) {
           f->dump_string("original_name", trash_original_name);
+        } else if (get_mirror_primary_res == 0) {
+	  f->dump_bool("demoted", mirror_primary_snap.demoted);
+          f->open_array_section("mirror_peers");
+          for (auto &peer : mirror_primary_snap.mirror_peers) {
+            f->dump_string("peer_uuid", peer);
+          }
+          f->close_section();
+        } else if (get_mirror_non_primary_res == 0) {
+	  f->dump_string("primary_mirror_uuid",
+                         mirror_non_primary_snap.primary_mirror_uuid);
+          f->dump_unsigned("primary_snap_id",
+                           mirror_non_primary_snap.primary_snap_id);
+	  f->dump_bool("copied", mirror_non_primary_snap.copied);
+          f->dump_unsigned("copy_progress",
+                           mirror_non_primary_snap.copy_progress);
         }
 	f->close_section();
       }
@@ -148,6 +179,18 @@ int do_list_snaps(librbd::Image& image, Formatter *f, bool all_snaps, librados::
 		      << group_snap.group_snap_name << ")";
         } else if (get_trash_res == 0) {
           oss << " (" << trash_original_name << ")";
+        } else if (get_mirror_primary_res == 0) {
+          oss << " (" << (mirror_primary_snap.demoted ? " demoted " : "")
+                      << "peers:[" << mirror_primary_snap.mirror_peers << "])";
+        } else if (get_mirror_non_primary_res == 0) {
+          oss << " (" << mirror_non_primary_snap.primary_mirror_uuid << ":"
+              << mirror_non_primary_snap.primary_snap_id << " ";
+          if (mirror_non_primary_snap.copied) {
+            oss << "copied";
+          } else {
+            oss << mirror_non_primary_snap.copy_progress;
+          }
+          oss << ")";
         }
 
 	t << oss.str();
