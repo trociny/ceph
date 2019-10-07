@@ -88,6 +88,7 @@ set(unittest_librbd_srcs
   mirror/test_mock_DisableRequest.cc
   mirror_snapshot/test_mock_CreateNonPrimaryRequest.cc
   mirror_snapshot/test_mock_CreatePrimaryRequest.cc
+  mirror_snapshot/test_mock_UnlinkPeerRequest.cc
   object_map/test_mock_InvalidateRequest.cc
   object_map/test_mock_LockRequest.cc
   object_map/test_mock_RefreshRequest.cc
