@@ -104,6 +104,8 @@ set(librbd_internal_srcs
   mirror/GetInfoRequest.cc
   mirror/GetStatusRequest.cc
   mirror/PromoteRequest.cc
+  mirror_snapshot/CreateNonPrimaryRequest.cc
+  mirror_snapshot/CreatePrimaryRequest.cc
   object_map/CreateRequest.cc
   object_map/InvalidateRequest.cc
   object_map/LockRequest.cc

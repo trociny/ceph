@@ -86,6 +86,8 @@ set(unittest_librbd_srcs
   managed_lock/test_mock_ReacquireRequest.cc
   managed_lock/test_mock_ReleaseRequest.cc
   mirror/test_mock_DisableRequest.cc
+  mirror_snapshot/test_mock_CreateNonPrimaryRequest.cc
+  mirror_snapshot/test_mock_CreatePrimaryRequest.cc
   object_map/test_mock_InvalidateRequest.cc
   object_map/test_mock_LockRequest.cc
   object_map/test_mock_RefreshRequest.cc
