@@ -148,7 +148,7 @@ int write_data(librbd::Image &image, librbd::ImageOptions &opts,
         goto err_writesame;
       }
       ++i;
-      off += tpw.chunk_size;
+      off += std::min(tpw.chunk_size, image_size - off);
       pc.update_progress(off, image_size);
     }
   }
