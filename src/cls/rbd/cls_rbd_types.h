@@ -131,6 +131,12 @@ std::ostream& operator<<(std::ostream& os, const MirrorPeer& peer);
 
 WRITE_CLASS_ENCODER(MirrorPeer);
 
+enum MirrorImageMode {
+  MIRROR_IMAGE_MODE_UNKNOWN  = 0,
+  MIRROR_IMAGE_MODE_JOURNAL  = 1,
+  MIRROR_IMAGE_MODE_SNAPSHOT = 2,
+};
+
 enum MirrorImageState {
   MIRROR_IMAGE_STATE_DISABLING = 0,
   MIRROR_IMAGE_STATE_ENABLED   = 1,
@@ -138,10 +144,14 @@ enum MirrorImageState {
 };
 
 struct MirrorImage {
-  MirrorImage() {}
-  MirrorImage(const std::string &global_image_id, MirrorImageState state)
-    : global_image_id(global_image_id), state(state) {}
+  MirrorImage() {
+  }
+  MirrorImage(MirrorImageMode mode, const std::string &global_image_id,
+              MirrorImageState state)
+    : mode(mode), global_image_id(global_image_id), state(state) {
+  }
 
+  MirrorImageMode mode = MIRROR_IMAGE_MODE_UNKNOWN;
   std::string global_image_id;
   MirrorImageState state = MIRROR_IMAGE_STATE_DISABLING;
 
@@ -155,6 +165,7 @@ struct MirrorImage {
   bool operator<(const MirrorImage &rhs) const;
 };
 
+std::ostream& operator<<(std::ostream& os, const MirrorImageMode& mirror_mode);
 std::ostream& operator<<(std::ostream& os, const MirrorImageState& mirror_state);
 std::ostream& operator<<(std::ostream& os, const MirrorImage& mirror_image);
 

@@ -79,7 +79,7 @@ Context *EnableRequest<I>::handle_get_mirror_image(int *result) {
   }
 
   *result = 0;
-  m_mirror_image.state = cls::rbd::MIRROR_IMAGE_STATE_ENABLED;
+  m_mirror_image.state = cls::rbd::MIRROR_IMAGE_STATE_ENABLED_JOURNAL;
   if (m_non_primary_global_image_id.empty()) {
     uuid_d uuid_gen;
     uuid_gen.generate_random();
@@ -166,8 +166,7 @@ void EnableRequest<I>::send_notify_mirroring_watcher() {
     klass, &klass::handle_notify_mirroring_watcher>(this);
 
   MirroringWatcher<>::notify_image_updated(m_io_ctx,
-                                           cls::rbd::MIRROR_IMAGE_STATE_ENABLED,
-                                           m_image_id,
+                                           m_mirror_image.state, m_image_id,
                                            m_mirror_image.global_image_id, ctx);
 }
 

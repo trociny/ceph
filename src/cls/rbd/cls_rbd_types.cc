@@ -120,39 +120,74 @@ std::ostream& operator<<(std::ostream& os, const MirrorPeer& peer) {
 }
 
 void MirrorImage::encode(bufferlist &bl) const {
-  ENCODE_START(1, 1, bl);
+  ENCODE_START(2, 1, bl);
   encode(global_image_id, bl);
   encode(static_cast<uint8_t>(state), bl);
+  encode(static_cast<uint8_t>(mode), bl);
   ENCODE_FINISH(bl);
 }
 
 void MirrorImage::decode(bufferlist::const_iterator &it) {
   uint8_t int_state;
-  DECODE_START(1, it);
+  DECODE_START(2, it);
   decode(global_image_id, it);
   decode(int_state, it);
   state = static_cast<MirrorImageState>(int_state);
+  if (struct_v >= 2) {
+    uint8_t int_mode;
+    decode(int_mode, it);
+    mode = static_cast<MirrorImageMode>(int_mode);
+  } else {
+    mode = MIRROR_IMAGE_MODE_JOURNAL;
+  }
   DECODE_FINISH(it);
 }
 
 void MirrorImage::dump(Formatter *f) const {
+  f->dump_stream("mode") << mode;
   f->dump_string("global_image_id", global_image_id);
-  f->dump_int("state", state);
+  f->dump_stream("state") << state;
 }
 
 void MirrorImage::generate_test_instances(std::list<MirrorImage*> &o) {
   o.push_back(new MirrorImage());
-  o.push_back(new MirrorImage("uuid-123", MIRROR_IMAGE_STATE_ENABLED));
-  o.push_back(new MirrorImage("uuid-abc", MIRROR_IMAGE_STATE_DISABLING));
+  o.push_back(new MirrorImage(MIRROR_IMAGE_MODE_JOURNAL, "uuid-123",
+                              MIRROR_IMAGE_STATE_ENABLED));
+  o.push_back(new MirrorImage(MIRROR_IMAGE_MODE_SNAPSHOT, "uuid-abc",
+                              MIRROR_IMAGE_STATE_DISABLING));
 }
 
 bool MirrorImage::operator==(const MirrorImage &rhs) const {
-  return global_image_id == rhs.global_image_id && state == rhs.state;
+  return mode == rhs.mode && global_image_id == rhs.global_image_id &&
+         state == rhs.state;
 }
 
 bool MirrorImage::operator<(const MirrorImage &rhs) const {
-  return global_image_id < rhs.global_image_id ||
-	(global_image_id == rhs.global_image_id  && state < rhs.state);
+  if (mode != rhs.mode) {
+    return mode < rhs.mode;
+  }
+  if (global_image_id != rhs.global_image_id) {
+    return global_image_id < rhs.global_image_id;
+  }
+  return state < rhs.state;
+}
+
+std::ostream& operator<<(std::ostream& os, const MirrorImageMode& mirror_mode) {
+  switch (mirror_mode) {
+  case MIRROR_IMAGE_MODE_UNKNOWN:
+    os << "unknown";
+    break;
+  case MIRROR_IMAGE_MODE_JOURNAL:
+    os << "journal";
+    break;
+  case MIRROR_IMAGE_MODE_SNAPSHOT:
+    os << "snapshot";
+    break;
+  default:
+    os << "unknown (" << static_cast<uint32_t>(mirror_mode) << ")";
+    break;
+  }
+  return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const MirrorImageState& mirror_state) {
@@ -163,6 +198,9 @@ std::ostream& operator<<(std::ostream& os, const MirrorImageState& mirror_state)
   case MIRROR_IMAGE_STATE_ENABLED:
     os << "enabled";
     break;
+  case MIRROR_IMAGE_STATE_DISABLED:
+    os << "disabled";
+    break;
   default:
     os << "unknown (" << static_cast<uint32_t>(mirror_state) << ")";
     break;
@@ -172,6 +210,7 @@ std::ostream& operator<<(std::ostream& os, const MirrorImageState& mirror_state)
 
 std::ostream& operator<<(std::ostream& os, const MirrorImage& mirror_image) {
   os << "["
+     << "mode=" << mirror_image.mode << ", "
      << "global_image_id=" << mirror_image.global_image_id << ", "
      << "state=" << mirror_image.state << "]";
   return os;

@@ -306,7 +306,7 @@ Context *DisableFeaturesRequest<I>::handle_get_mirror_image(int *result) {
     return handle_finish(*result);
   }
 
-  if ((mirror_image.state == cls::rbd::MIRROR_IMAGE_STATE_ENABLED) && !m_force) {
+  if (mirror_image.state == cls::rbd::MIRROR_IMAGE_STATE_ENABLED && !m_force) {
     lderr(cct) << "cannot disable journaling: image mirroring "
                << "enabled and mirror pool mode set to image"
                << dendl;
