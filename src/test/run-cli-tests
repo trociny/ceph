@@ -42,7 +42,7 @@ mkdir -p "$FAKE_HOME"
 # run, so run it once per directory
 FAILED=0
 FAILEDTOOLS=""
-for tool in "$SRCDIR"/cli/*; do
+for tool in "$SRCDIR"/cli/rbd; do
     toolname="$(basename "$tool")"
     install -d -m0755 -- "$BUILDDIR/cli/$toolname"
     if ! env -i \
