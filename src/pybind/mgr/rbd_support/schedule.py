@@ -5,6 +5,7 @@ import re
 
 from datetime import datetime, timedelta, time
 from dateutil.parser import parse
+from dateutil.relativedelta import relativedelta
 
 from .common import get_rbd_pools
 
@@ -215,41 +216,48 @@ class LevelSpec:
 
 class Interval:
 
-    def __init__(self, minutes):
-        self.minutes = minutes
+    def __init__(self, interval, units):
+        self.interval = interval
+        self.units = units
 
     def __eq__(self, interval):
-        return self.minutes == interval.minutes
+        if self.units == 'mo':
+            return interval.units == 'mo' and self.interval == interval.interval
+        else:
+            return self.minutes == interval.minutes
 
     def __hash__(self):
         return hash(self.minutes)
 
-    def to_string(self):
-        if self.minutes % (60 * 24) == 0:
-            interval = int(self.minutes / (60 * 24))
-            units = 'd'
-        elif self.minutes % 60 == 0:
-            interval = int(self.minutes / 60)
-            units = 'h'
-        else:
-            interval = int(self.minutes)
-            units = 'm'
+    def is_floating(self):
+        return self.units == 'mo'
 
-        return "{}{}".format(interval, units)
+    @property
+    def minutes(self):
+        if self.units == 'm':
+            return self.interval
+        elif self.units == 'h':
+            return self.interval * 60
+        elif self.units == 'd':
+            return self.interval * 60 * 24
+        elif self.units == 'w':
+            return self.interval * 60 * 24 * 7
+        else:
+            return None
+
+    def to_string(self):
+        return "{}{}".format(self.interval, self.units)
 
     @classmethod
     def from_string(cls, interval):
-        match = re.match(r'^(\d+)(d|h|m)?$', interval)
+        match = re.match(r'^(\d*)(mo|w|d|h|m)?$', interval)
         if not match:
             raise ValueError("Invalid interval ({})".format(interval))
 
-        minutes = int(match.group(1))
-        if match.group(2) == 'd':
-            minutes *= 60 * 24
-        elif match.group(2) == 'h':
-            minutes *= 60
+        interval = match.group(1) and int(match.group(1)) or 1
+        units = match.group(2) and match.group(2) or 'm'
 
-        return Interval(minutes)
+        return Interval(interval, units)
 
 
 class StartTime:
@@ -300,12 +308,19 @@ class Schedule:
     def next_run(self, now):
         schedule_time = None
         for item in self.items:
-            period = timedelta(minutes=item[0].minutes)
+            interval = item[0]
             start_time = datetime(1970, 1, 1)
             if item[1]:
                 start_time += timedelta(minutes=item[1].minutes)
-            time = start_time + \
-                (int((now - start_time) / period) + 1) * period
+            if interval.units == 'mo':
+                period = interval.interval
+                d = relativedelta(now, start_time)
+                months=(int((d.years * 12 + d.months) / period) + 1) * period
+                time = start_time + relativedelta(months=months)
+            else:
+                period = timedelta(minutes=interval.minutes)
+                time = start_time + \
+                    (int((now - start_time) / period) + 1) * period
             if schedule_time is None or time < schedule_time:
                 schedule_time = time
         return datetime.strftime(schedule_time, "%Y-%m-%d %H:%M:00")
@@ -553,15 +568,22 @@ class RetentionPolicy:
     def next_run(self, now):
         schedule_time = None
         for interval in self.intervals:
-            period = timedelta(minutes=interval.minutes)
             start_time = datetime(1970, 1, 1)
-            time = start_time + \
-                (int((now - start_time) / period) + 1) * period
+            if interval.units == 'mo':
+                period = interval.interval
+                d = relativedelta(now, start_time)
+                months=(int((d.years * 12 + d.months) / period) + 1) * period
+                time = start_time + relativedelta(months=months)
+            else:
+                period = timedelta(minutes=interval.minutes)
+                time = start_time + \
+                    (int((now - start_time) / period) + 1) * period
             if schedule_time is None or time < schedule_time:
                 schedule_time = time
         return datetime.strftime(schedule_time, "%Y-%m-%d %H:%M:00")
 
-    def apply(self, now, items):
+    def apply(self, now, items, log):
+        log.debug("XXXMG: now={} items={}".format(now, items))
         if not items:
             return []
 
@@ -573,14 +595,21 @@ class RetentionPolicy:
         min_time = items[min(items, key=items.get)]
         time_points = {time : TimePoint(name) for name, time in items.items()}
         now = datetime(now.year, now.month, now.day, now.hour, now.minute)
+        log.debug("XXXMG: now={} min_time={} time_points".format(now, min_time, time_points))
 
         for interval, count in self.intervals.items():
+            log.debug("XXXMG: interval={} count={}".format(interval.to_string(), count))
             if not count:
                 count = 2**31
+            if interval.units == 'mo':
+                log.debug("XXXMG: interval={}: skip for now".format(interval.to_string()))
+                continue
             for i in range(count):
                 time = now - timedelta(minutes=interval.minutes * i)
-                if time < min_time - timedelta(minutes=interval.minutes / 2):
+                if time < min_time - timedelta(minutes=interval.minutes):
+                    log.debug("XXXMG: time={} => break".format(time))
                     break
+                log.debug("XXXMG: add interval={} at {}".format(interval.to_string(), time))
                 tp = time_points.pop(time, TimePoint(None))
                 tp.intervals.add(interval)
                 time_points[time] = tp
@@ -588,41 +617,35 @@ class RetentionPolicy:
         to_keep = set()
         times = sorted(time_points)
 
-        def find_closest_item_time(start_time, max_distance_minutes, i, step):
+        def find_nearest(start_time, max_distance_minutes, i):
             max_distance = timedelta(minutes=max_distance_minutes)
-            while i >= 0 and i < len(times):
+            while i < len(times):
                 time = times[i]
-                if abs(start_time - time) > max_distance:
-                    return None, None
+                if abs(time - start_time) > max_distance:
+                    return None
                 tp = time_points[time]
                 if tp.name:
-                    return time, tp
-                i += step
-            return None, None
+                    return tp.name
+                i += 1
+            return None
 
         for i in range(len(times)):
             time = times[i]
             tp = time_points[time]
+            log.debug("XXXMG: time={} tp={}".format(time, tp.name))
             for interval in tp.intervals:
-                if tp.name:
-                    to_keep.add(tp.name)
+                log.debug("XXXMG: interval={}".format(interval.to_string()))
+                if interval.units == 'mo':
+                    log.debug("XXXMG: interval={}: skip for now".format(interval.to_string()))
+                    continue
+                name = find_nearest(time, interval.minutes, i)
+                log.debug("XXXMG: nearest name={}".format(name))
+                if name:
+                    to_keep.add(name)
                     break
-                time_left, tp_left = find_closest_item_time(
-                    time, interval.minutes / 2, i - 1, -1)
-                time_right, tp_right = find_closest_item_time(
-                    time, interval.minutes / 2, i + 1, 1)
-                if not tp_left and not tp_right:
-                    continue
-                if not tp_left:
-                    to_keep.add(tp_right.name)
-                    continue
-                if not tp_right:
-                    to_keep.add(tp_left.name)
-                    continue
-                if time - time_left < time_right - time:
-                    to_keep.add(tp_left.name)
-                else:
-                    to_keep.add(tp_right.name)
+                log.debug("XXXMG: closest item not found")
+
+        log.debug("XXXMG: to_keep={}".format(to_keep))
 
         return [name for name in sorted(items) if name not in to_keep]
 

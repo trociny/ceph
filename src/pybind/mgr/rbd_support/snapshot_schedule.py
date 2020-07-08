@@ -161,7 +161,7 @@ class SnapshotScheduleHandler:
                     scheduled = {s['name'] : datetime.strptime(s['name'], fmt)
                                  for s in image.list_snaps()
                                  if re.match(rgx, s['name'])}
-                    expired_snaps = policy.apply(datetime.now(), scheduled)
+                    expired_snaps = policy.apply(datetime.now(), scheduled, self.log)
 
                     if not expired_snaps:
                         return
