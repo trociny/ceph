@@ -16,6 +16,8 @@
 #include "tools/rbd_mirror/image_replayer/Utils.h"
 #include "GroupReplayer.h"
 
+#include <algorithm>
+
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rbd_mirror
 #undef dout_prefix
@@ -28,6 +30,7 @@ namespace rbd {
 namespace mirror {
 
 using librbd::util::create_context_callback;
+using librbd::util::create_rados_callback;
 using librbd::util::unique_lock_name;
 
 namespace {
@@ -296,6 +299,7 @@ void GroupReplayer<I>::stop(Context *on_finish, bool manual, bool restart) {
            << ", restart=" << restart << dendl;
 
   group_replayer::BootstrapRequest<I> *bootstrap_request = nullptr;
+  std::map<ImageReplayer<I> *, Context *> create_snap_requests;
   bool shut_down_replay = false;
   bool running = true;
   {
@@ -321,7 +325,12 @@ void GroupReplayer<I>::stop(Context *on_finish, bool manual, bool restart) {
 	  }
 	} else {
 	  dout(10) << "interrupting replay" << dendl;
-	  shut_down_replay = true;
+          if (m_pending_snap_create) {
+            dout(10) << "waiting for pending create snap" << dendl;
+          } else {
+            std::swap(create_snap_requests, m_create_snap_requests);
+            shut_down_replay = true;
+          }
           m_state = STATE_STOPPING;
 	}
 
@@ -337,6 +346,10 @@ void GroupReplayer<I>::stop(Context *on_finish, bool manual, bool restart) {
     dout(10) << "canceling bootstrap" << dendl;
     bootstrap_request->cancel();
     bootstrap_request->put();
+  }
+
+  for (auto &[_, on_finish] : create_snap_requests) {
+    on_finish->complete(-ESTALE);
   }
 
   if (!running) {
@@ -441,7 +454,8 @@ void GroupReplayer<I>::bootstrap_group() {
     m_threads, m_local_io_ctx, m_remote_group_peer.io_ctx, m_global_group_id,
     m_local_mirror_uuid, m_instance_watcher, m_local_status_updater,
     m_remote_group_peer.mirror_status_updater, m_cache_manager_handler,
-    m_pool_meta_cache, &m_local_group_ctx, &m_image_replayers, ctx);
+    m_pool_meta_cache, &m_remote_group_id, &m_local_group_ctx,
+    &m_image_replayers, ctx);
 
   request->get();
   m_bootstrap_request = request;
@@ -459,7 +473,13 @@ void GroupReplayer<I>::handle_bootstrap_group(int r) {
     std::lock_guard locker{m_lock};
     m_bootstrap_request->put();
     m_bootstrap_request = nullptr;
+    m_local_group_ctx.listener = &m_listener;
+    if (!m_local_group_ctx.name.empty()) {
+      m_local_group_name = m_local_group_ctx.name;
+    }
   }
+
+  reregister_admin_socket_hook();
 
   if (finish_start_if_interrupted()) {
     return;
@@ -476,12 +496,6 @@ void GroupReplayer<I>::handle_bootstrap_group(int r) {
     finish_start(r, "bootstrap failed");
     return;
   }
-
-  {
-    std::lock_guard locker{m_lock};
-    m_local_group_name = m_local_group_ctx.name;
-  }
-  reregister_admin_socket_hook();
 
   start_image_replayers();
 }
@@ -750,10 +764,11 @@ void GroupReplayer<I>::set_mirror_group_status_update(
 
 template <typename I>
 void GroupReplayer<I>::create_mirror_snapshot_start(
-    const std::string &remote_group_snap_id, ImageReplayer<I> *image_replayer,
-    int64_t *local_group_pool_id, std::string *local_group_id,
-    std::string *local_group_snap_id, Context *on_finish) {
-  dout(20) << remote_group_snap_id << " " << image_replayer << dendl;
+    const cls::rbd::MirrorSnapshotNamespace &remote_group_snap_ns,
+    ImageReplayer<I> *image_replayer, int64_t *local_group_pool_id,
+    std::string *local_group_id, std::string *local_group_snap_id,
+    Context *on_finish) {
+  dout(20) << remote_group_snap_ns << " " << image_replayer << dendl;
 
   std::unique_lock locker{m_lock};
   ceph_assert(m_pending_snap_create == false);
@@ -767,17 +782,24 @@ void GroupReplayer<I>::create_mirror_snapshot_start(
 
   if (m_remote_group_snap_id.empty()) {
     ceph_assert(m_create_snap_requests.empty());
-    m_remote_group_snap_id = remote_group_snap_id;
+    ceph_assert(remote_group_snap_ns.is_primary());
 
-    // XXXMG: make the same name as the primary snapshot has
+    m_remote_group_snap_id = remote_group_snap_ns.group_snap_id;
+
+    auto snap_state =
+        remote_group_snap_ns.state == cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY ?
+          cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY :
+          cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED;
+
+    // XXXMG: make the same name as the primary snapshot has?
     m_group_snap = {librbd::util::generate_uuid(m_local_io_ctx),
                     cls::rbd::MirrorGroupSnapshotNamespace{
-                        cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY,
-                        {}, m_remote_group_peer.uuid, m_remote_group_snap_id},
+                        snap_state, {}, m_remote_group_peer.uuid, m_remote_group_snap_id},
                     calc_ind_mirror_snap_name(
                         m_remote_group_peer.io_ctx.get_id(), m_remote_group_id,
                         m_remote_group_snap_id),
                     cls::rbd::GROUP_SNAPSHOT_STATE_INCOMPLETE};
+    return;
   }
 
   ceph_assert(m_create_snap_requests.count(image_replayer) == 0);
@@ -787,8 +809,8 @@ void GroupReplayer<I>::create_mirror_snapshot_start(
   *local_group_id = m_local_group_ctx.group_id;
   *local_group_snap_id = m_group_snap.id;
 
-  if (m_remote_group_snap_id != remote_group_snap_id) {
-    dout(15) << "request snap_id " << remote_group_snap_id
+  if (m_remote_group_snap_id != remote_group_snap_ns.group_snap_id) {
+    dout(15) << "request snap_id " << remote_group_snap_ns.group_snap_id
              << " does not match us " << m_remote_group_snap_id
              << " -- restarting" << dendl;
     auto create_snap_requests = m_create_snap_requests;
