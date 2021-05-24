@@ -71,15 +71,40 @@ def task(ctx, config):
     rados(ctx, mon, ['-p', pool, 'bench', '30', 'write', '-b', '4096',
                           '--no-cleanup'])
 
-    log.info("remove object from all non-primary shard and start backfill")
+    log.info("remove object from one non-primary shard and start backfill")
+    victim = acting[1]
+
+    manager.objectstore_tool(pool, options='', args='remove',
+                             object_name=obj, osd=victim)
+
+    # mark the osd out to trigger a rebalance/backfill
+    manager.mark_out_osd(victim)
+
+    # wait for everything to peer, backfill and recover
+    manager.flush_pg_stats([0, 1, 2, 3])
+    manager.wait_for_recovery()
+
+    manager.flush_pg_stats([0, 1, 2, 3])
+    pg = next((pg for pg in pgs if pg['pgid'] == pgid), None)
+    log.info('pg=%s' % pg);
+    assert pg
+    assert 'clean' in pg['state'].split('+')
+    unfound = manager.get_num_unfound_objects()
+    log.info("there are %d unfound objects" % unfound)
+    assert unfound == 0
+
+    log.info("remove object from all non-primary shards and start backfill")
+    acting = pg['acting']
+    assert acting[0] == primary
+    assert victim not in acting
     victims = acting[1:]
 
     for i in victims:
         manager.objectstore_tool(pool, options='', args='remove',
                                  object_name=obj, osd=i)
 
-    # mark one of the osds out to trigger a rebalance/backfill
-    manager.mark_out_osd(victims[0])
+    # mark the out osd in to trigger a rebalance/backfill
+    manager.mark_in_osd(victim)
 
     # wait for everything to peer, backfill and detect unfound object
     manager.flush_pg_stats([0, 1, 2, 3])
