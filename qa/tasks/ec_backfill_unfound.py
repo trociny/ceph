@@ -81,6 +81,7 @@ def task(ctx, config):
     manager.mark_out_osd(victim)
 
     # wait for everything to peer, backfill and recover
+    manager.wait_till_active()
     while True:
         manager.flush_pg_stats([0, 1, 2, 3])
         pgs = manager.get_pg_stats()
@@ -89,7 +90,7 @@ def task(ctx, config):
         if victim not in pg['acting']:
             break
         time.sleep(1)
-    manager.wait_for_recovery()
+    manager.wait_for_clean()
 
     manager.flush_pg_stats([0, 1, 2, 3])
     pg = next((pg for pg in pgs if pg['pgid'] == pgid), None)
@@ -120,19 +121,12 @@ def task(ctx, config):
         manager.flush_pg_stats([0, 1, 2, 3])
         pgs = manager.get_pg_stats()
         pg = next((pg for pg in pgs if pg['pgid'] == pgid), None)
-        log.info('pg=%s' % pg)
-        if victim in pg['acting']:
-            break
-        time.sleep(1)
-    while True:
-        manager.flush_pg_stats([0, 1, 2, 3])
-        pgs = manager.get_pg_stats()
-        pg = next((pg for pg in pgs if pg['pgid'] == pgid), None)
         log.info('pg=%s' % pg);
         status = pg['state'].split('+')
         if 'active' in status and 'backfilling' not in status:
             break
         time.sleep(1)
+    manager.wait_till_active()
 
     # verify that there is unfound object
     pgs = manager.get_pg_stats()
