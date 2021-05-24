@@ -93,6 +93,7 @@ def task(ctx, config):
     manager.wait_for_clean()
 
     manager.flush_pg_stats([0, 1, 2, 3])
+    pgs = manager.get_pg_stats()
     pg = next((pg for pg in pgs if pg['pgid'] == pgid), None)
     log.info('pg=%s' % pg)
     assert pg
