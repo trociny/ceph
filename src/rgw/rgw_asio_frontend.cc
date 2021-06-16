@@ -587,7 +587,11 @@ int AsioFrontend::init_ssl()
       return -EINVAL;
     }
     options_str = options->second;
+  } else if (have_cert) {
+    options_str = "no_sslv2:no_sslv3:no_tlsv1:no_tlsv1_1";
+  }
 
+  if (!options_str.empty()) {
     for (auto &option : ceph::split(options_str, ":")) {
       if (option == "default_workarounds") {
         ssl_context->set_options(ssl::context::default_workarounds);
