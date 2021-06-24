@@ -3,4 +3,3 @@ overrides:
     conf:
       client:
         rbd default features: 125
-        debug rbd: 30
