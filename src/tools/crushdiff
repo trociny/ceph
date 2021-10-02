@@ -57,7 +57,7 @@ parser.add_argument(
 parser.add_argument(
     '-m', '--osdmap',
     metavar='osdmap',
-    help='',
+    help='osdmap file',
     default=None,
 )
 parser.add_argument(
@@ -65,6 +65,45 @@ parser.add_argument(
     metavar='pg-dump',
     help='`ceph pg dump` json output',
     default=None,
+)
+parser.add_argument(
+    '--mark-up-in',
+    action='store_true',
+    help='mark osds up and in',
+    default=False,
+)
+parser.add_argument(
+    '--mark-out',
+    metavar='osdid',
+    help='mark an osd as out',
+    type=int,
+    default=None,
+)
+parser.add_argument(
+    '--mark-up',
+    metavar='osdid',
+    help='mark an osd as up',
+    type=int,
+    default=None,
+)
+parser.add_argument(
+    '--mark-in',
+    metavar='osdid',
+    help='mark an osd as in',
+    type=int,
+    default=None,
+)
+parser.add_argument(
+    '--clear-temp',
+    action='store_true',
+    help='clear pg_temp and primary_temp',
+    default=False,
+)
+parser.add_argument(
+    '--clean-temps',
+    action='store_true',
+    help='clean pg_temps',
+    default=False,
 )
 parser.add_argument(
     '-v', '--verbose',
@@ -146,8 +185,26 @@ def parse_test_map_pgs_dump(file):
 
     return pgs
 
+def make_osmaptool_options(args):
+    options = ''
+
+    if args.mark_up_in:
+        options += ' --mark-up-in'
+    if args.mark_out is not None:
+        options += ' --mark-out {}'.format(args.mark_out)
+    if args.mark_up is not None:
+        options += ' --mark-up {}'.format(args.mark_up)
+    if args.mark_in is not None:
+        options += ' --mark-in {}'.format(args.mark_in)
+    if args.clear_temp:
+        options += ' --clear-temp'
+    if args.clean_temps:
+        options += ' --clean-temps'
+
+    return options
+
 def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
-               verbose=False):
+               osdmaptool_options = '', verbose=False):
     with tempfile.TemporaryDirectory() as tmpdirname:
         if compiled:
             new_crushmap_file = new_crushmap_in
@@ -167,21 +224,22 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
             run_cmd('ceph pg dump --format json > {}'.format(pg_dump), verbose)
 
         old_test_map_pgs_dump = os.path.join(tmpdirname, 'pgs.old.txt')
-        run_cmd('osdmaptool {} --test-map-pgs-dump > {}'.format(
-            osdmap_file, old_test_map_pgs_dump), verbose)
+        run_cmd('osdmaptool {} {} --test-map-pgs-dump > {}'.format(
+            osdmap_file, osdmaptool_options, old_test_map_pgs_dump), verbose)
         if verbose:
             run_cmd('cat {} >&2'.format(old_test_map_pgs_dump), True)
 
         new_test_map_pgs_dump = os.path.join(tmpdirname, 'pgs.new.txt')
         run_cmd(
-            'osdmaptool {} --import-crush {} --test-map-pgs-dump > {}'.format(
-                osdmap_file, new_crushmap_file, new_test_map_pgs_dump), verbose)
+            'osdmaptool {} {} --import-crush {} --test-map-pgs-dump > {}'.format(
+                osdmap_file, osdmaptool_options, new_crushmap_file,
+                new_test_map_pgs_dump), verbose)
         if verbose:
             run_cmd('cat {} >&2'.format(new_test_map_pgs_dump), True)
 
         osdmap_file_json = os.path.join(tmpdirname, 'osdmap.json')
-        run_cmd('osdmaptool {} --dump json > {}'.format(
-            osdmap_file, osdmap_file_json), verbose)
+        run_cmd('osdmaptool {} {} --dump json > {}'.format(
+            osdmap_file, osdmaptool_options, osdmap_file_json), verbose)
         osdmap = get_osdmap(osdmap_file_json)
         pools = get_pools(osdmap)
         ec_profiles = get_erasure_code_profiles(osdmap)
@@ -322,8 +380,9 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'compare':
+        osdmaptool_options = make_osmaptool_options(args)
         do_compare(args.crushmap, args.osdmap, args.pg_dump, args.compiled,
-                   args.verbose)
+                   osdmaptool_options, args.verbose)
     elif args.command == 'export':
         do_export(args.crushmap, args.osdmap, args.compiled, args.verbose)
     elif args.command == 'import':
