@@ -352,7 +352,7 @@ int main(int argc, const char **argv)
   }
 
   if (mark_up_in) {
-    cout << "marking all OSDs up and in" << std::endl;
+    cerr << "marking all OSDs up and in" << std::endl;
     int n = osdmap.get_max_osd();
     for (int i=0; i<n; i++) {
       osdmap.set_state(i, osdmap.get_state(i) | CEPH_OSD_UP);
@@ -364,20 +364,20 @@ int main(int argc, const char **argv)
   }
 
   if (marked_out >=0 && marked_out < osdmap.get_max_osd()) {
-    cout << "marking OSD@" << marked_out << " as out" << std::endl;
+    cerr << "marking OSD@" << marked_out << " as out" << std::endl;
     int id = marked_out;
     osdmap.set_state(id, osdmap.get_state(id) | CEPH_OSD_UP);
     osdmap.set_weight(id, CEPH_OSD_OUT);
   }
 
   if (marked_up >=0 && marked_up < osdmap.get_max_osd()) {
-    cout << "marking OSD@" << marked_up << " as up" << std::endl;
+    cerr << "marking OSD@" << marked_up << " as up" << std::endl;
     int id = marked_up;
     osdmap.set_state(id, osdmap.get_state(id) | CEPH_OSD_UP);
   }
 
   if (marked_in >=0 && marked_in < osdmap.get_max_osd()) {
-    cout << "marking OSD@" << marked_up << " as up" << std::endl;
+    cerr << "marking OSD@" << marked_up << " as up" << std::endl;
     int id = marked_up;
     osdmap.set_weight(id, CEPH_OSD_IN);
   }
@@ -405,11 +405,11 @@ int main(int argc, const char **argv)
   });
 
   if (clear_temp) {
-    cout << "clearing pg/primary temp" << std::endl;
+    cerr << "clearing pg/primary temp" << std::endl;
     osdmap.clear_temp();
   }
   if (clean_temps) {
-    cout << "cleaning pg temps" << std::endl;
+    cerr << "cleaning pg temps" << std::endl;
     OSDMap::Incremental pending_inc(osdmap.get_epoch()+1);
     OSDMap tmpmap;
     tmpmap.deepish_copy_from(osdmap);
@@ -425,11 +425,11 @@ int main(int argc, const char **argv)
 	     << std::endl;
 	exit(1);
       }
-      cout << "writing upmap command output to: " << upmap_file << std::endl;
+      cerr << "writing upmap command output to: " << upmap_file << std::endl;
     }
   }
   if (upmap_cleanup) {
-    cout << "checking for upmap cleanups" << std::endl;
+    cerr << "checking for upmap cleanups" << std::endl;
     OSDMap::Incremental pending_inc(osdmap.get_epoch()+1);
     pending_inc.fsid = osdmap.get_fsid();
     int r = osdmap.clean_pg_upmaps(g_ceph_context, &pending_inc);
