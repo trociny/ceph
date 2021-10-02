@@ -49,6 +49,28 @@ ports 8000 and 8001:
    ceph orch host label add gwhost2 rgw
    ceph orch apply rgw foo '--placement=label:rgw count-per-host:2' --port=8000
 
+.. _cephadm-rgw-networks:
+
+Specifying Networks
+-------------------
+
+The RGW service can have the network they bind to configured with a yaml service specification.
+
+example spec file:
+
+.. code-block:: yaml
+
+    service_type: rgw
+    service_name: foo
+    placement:
+      label: rgw
+      count-per-host: 2
+    networks:
+    - 192.169.142.0/24
+    spec:
+      port: 8000
+
+
 Multisite zones
 ---------------
 
@@ -133,7 +155,7 @@ balancing on a floating virtual IP.
 If SSL is used, then SSL must be configured and terminated by the ingress service
 and not RGW itself.
 
-.. image:: ../images/HAProxy_for_RGW.svg
+.. image:: ../../images/HAProxy_for_RGW.svg
 
 There are N hosts where the ingress service is deployed.  Each host
 has a haproxy daemon and a keepalived daemon.  A virtual IP is

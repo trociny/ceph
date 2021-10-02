@@ -26,7 +26,6 @@ from .fixtures import (
     with_cephadm_ctx,
 )
 
-
 with mock.patch('builtins.open', create=True):
     from importlib.machinery import SourceFileLoader
     cd = SourceFileLoader('cephadm', 'cephadm').load_module()
@@ -914,6 +913,7 @@ iMN28C2bKGao5UHvdER1rGy7
 
 class TestMaintenance:
     systemd_target = "ceph.00000000-0000-0000-0000-000000c0ffee.target"
+    fsid = '0ea8cdd0-1bbf-11ec-a9c7-5254002763fa'
 
     def test_systemd_target_OK(self, tmp_path):
         base = tmp_path 
@@ -921,14 +921,16 @@ class TestMaintenance:
         wants.mkdir()
         target = wants / TestMaintenance.systemd_target
         target.touch()
-        cd.UNIT_DIR = str(base)
+        ctx = cd.CephadmContext()
+        ctx.unit_dir = str(base)
 
-        assert cd.systemd_target_state(target.name)
+        assert cd.systemd_target_state(ctx, target.name)
 
     def test_systemd_target_NOTOK(self, tmp_path):
         base = tmp_path 
-        cd.UNIT_DIR = str(base)
-        assert not cd.systemd_target_state(TestMaintenance.systemd_target)
+        ctx = cd.CephadmContext()
+        ctx.unit_dir = str(base)
+        assert not cd.systemd_target_state(ctx, TestMaintenance.systemd_target)
 
     def test_parser_OK(self):
         args = cd._parse_args(['host-maintenance', 'enter'])
@@ -937,6 +939,58 @@ class TestMaintenance:
     def test_parser_BAD(self):
         with pytest.raises(SystemExit):
             cd._parse_args(['host-maintenance', 'wah'])
+
+    @mock.patch('os.listdir', return_value=[])
+    @mock.patch('cephadm.call')
+    @mock.patch('cephadm.systemd_target_state')
+    def test_enter_failure_1(self, _target_state, _call, _listdir):
+        _call.return_value = '', '', 999
+        _target_state.return_value = True
+        ctx: cd.CephadmContext = cd.cephadm_init_ctx(
+            ['host-maintenance', 'enter', '--fsid', TestMaintenance.fsid])
+        ctx.container_engine = mock_podman()
+        retval = cd.command_maintenance(ctx)
+        assert retval.startswith('failed')
+
+    @mock.patch('os.listdir', return_value=[])
+    @mock.patch('cephadm.call')
+    @mock.patch('cephadm.systemd_target_state')
+    def test_enter_failure_2(self, _target_state, _call, _listdir):
+        _call.side_effect = [('', '', 0), ('', '', 999)]
+        _target_state.return_value = True
+        ctx: cd.CephadmContext = cd.cephadm_init_ctx(
+            ['host-maintenance', 'enter', '--fsid', TestMaintenance.fsid])
+        ctx.container_engine = mock_podman()
+        retval = cd.command_maintenance(ctx)
+        assert retval.startswith('failed')
+
+    @mock.patch('os.listdir', return_value=[])
+    @mock.patch('cephadm.call')
+    @mock.patch('cephadm.systemd_target_state')
+    @mock.patch('cephadm.target_exists')
+    def test_exit_failure_1(self, _target_exists, _target_state, _call, _listdir):
+        _call.return_value = '', '', 999
+        _target_state.return_value = False
+        _target_exists.return_value = True
+        ctx: cd.CephadmContext = cd.cephadm_init_ctx(
+            ['host-maintenance', 'exit', '--fsid', TestMaintenance.fsid])
+        ctx.container_engine = mock_podman()
+        retval = cd.command_maintenance(ctx)
+        assert retval.startswith('failed')
+
+    @mock.patch('os.listdir', return_value=[])
+    @mock.patch('cephadm.call')
+    @mock.patch('cephadm.systemd_target_state')
+    @mock.patch('cephadm.target_exists')
+    def test_exit_failure_2(self, _target_exists, _target_state, _call, _listdir):
+        _call.side_effect = [('', '', 0), ('', '', 999)]
+        _target_state.return_value = False
+        _target_exists.return_value = True
+        ctx: cd.CephadmContext = cd.cephadm_init_ctx(
+            ['host-maintenance', 'exit', '--fsid', TestMaintenance.fsid])
+        ctx.container_engine = mock_podman()
+        retval = cd.command_maintenance(ctx)
+        assert retval.startswith('failed')
 
 
 class TestMonitoring(object):
@@ -1484,7 +1538,8 @@ if ! grep -qs /var/lib/ceph/9b9d7609-f4d5-4aba-94c8-effa764d96c9/iscsi.daemon_id
 class TestCheckHost:
 
     @mock.patch('cephadm.find_executable', return_value='foo')
-    def test_container_engine(self, find_executable):
+    @mock.patch('cephadm.check_time_sync', return_value=True)
+    def test_container_engine(self, find_executable, check_time_sync):
         ctx = cd.CephadmContext()
 
         ctx.container_engine = None
@@ -1568,3 +1623,29 @@ class TestRmRepo:
 
         ctx.container_engine = mock_docker()
         cd.command_rm_repo(ctx)
+
+
+class TestPull:
+
+    @mock.patch('time.sleep')
+    @mock.patch('cephadm.call', return_value=('', '', 0))
+    @mock.patch('cephadm.get_image_info_from_inspect', return_value={})
+    def test_error(self, get_image_info_from_inspect, call, sleep):
+        ctx = cd.CephadmContext()
+        ctx.container_engine = mock_podman()
+
+        call.return_value = ('', '', 0)
+        retval = cd.command_pull(ctx)
+        assert retval == 0
+
+        err = 'maximum retries reached'
+
+        call.return_value = ('', 'foobar', 1)
+        with pytest.raises(cd.Error) as e:
+            cd.command_pull(ctx)
+        assert err not in str(e.value)
+
+        call.return_value = ('', 'net/http: TLS handshake timeout', 1)
+        with pytest.raises(cd.Error) as e:
+            cd.command_pull(ctx)
+        assert err in str(e.value)
