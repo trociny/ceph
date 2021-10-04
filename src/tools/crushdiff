@@ -203,13 +203,30 @@ def make_osmaptool_options(args):
 
     return options
 
+def get_crushmap(file):
+    with open(file, "r") as f:
+        return json.load(f)
+
+def get_crushmap_hosts(crushmap_json_file):
+    crushmap = get_crushmap(crushmap_json_file)
+    hosts = {}
+
+    for b in crushmap['buckets']:
+        if b['type_name'] != 'host':
+            continue
+        if '~' in b['name']:
+            continue
+        hosts[b['name']] = [x['id'] for x in b['items']]
+
+    return hosts
+
 def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
                osdmaptool_options = '', verbose=False):
     with tempfile.TemporaryDirectory() as tmpdirname:
         if compiled:
             new_crushmap_file = new_crushmap_in
         else:
-            new_crushmap_file = os.path.join(tmpdirname, 'crushmap')
+            new_crushmap_file = os.path.join(tmpdirname, 'crushmap.new')
             run_cmd('crushtool -c {} -o {}'.format(new_crushmap_in,
                                                    new_crushmap_file), verbose)
 
@@ -222,6 +239,18 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
         if not pg_dump:
             pg_dump = os.path.join(tmpdirname, 'pg_dump.json')
             run_cmd('ceph pg dump --format json > {}'.format(pg_dump), verbose)
+
+        old_crushmap_file = os.path.join(tmpdirname, 'crushmap.old')
+        run_cmd('osdmaptool {} --export-crush {}'.format(
+            osdmap_file, old_crushmap_file), verbose)
+
+        old_crushmap_json_file = os.path.join(tmpdirname, 'crushmap.json.old')
+        run_cmd('crushtool -i {} --dump --format json > {}'.format(
+            old_crushmap_file, old_crushmap_json_file), verbose)
+
+        new_crushmap_json_file = os.path.join(tmpdirname, 'crushmap.json.new')
+        run_cmd('crushtool -i {} --dump --format json > {}'.format(
+            new_crushmap_file, new_crushmap_json_file), verbose)
 
         old_test_map_pgs_dump = os.path.join(tmpdirname, 'pgs.old.txt')
         run_cmd('osdmaptool {} {} --test-map-pgs-dump > {}'.format(
@@ -249,6 +278,9 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
 
         old_pgs = parse_test_map_pgs_dump(old_test_map_pgs_dump)
         new_pgs = parse_test_map_pgs_dump(new_test_map_pgs_dump)
+
+        old_hosts = get_crushmap_hosts(old_crushmap_json_file)
+        new_hosts = get_crushmap_hosts(new_crushmap_json_file)
 
     diff_pg_count = 0
     total_object_count = 0
@@ -291,6 +323,8 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
     diff_object_shard_count = 0
     total_bytes = 0
     diff_bytes = 0
+    old_osd_stats = {}
+    new_osd_stats = {}
     for pgid in old_pgs:
         pool_id = int(pgid.split('.')[0])
         ec_profile = pools[pool_id]['erasure_code_profile']
@@ -309,7 +343,25 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
         total_object_shard_count += objects * (k + m)
         total_bytes += bytes * (k + m) / k
 
-        if old_pgs[pgid] == new_pgs[pgid]:
+        def add_osd_stats(osds, osd_stats):
+            for osd in osds:
+                s = osd_stats.get(osd, {
+                    'shard_count' : 0,
+                    'object_shard_count' : 0,
+                    'bytes' : 0
+                })
+                s['shard_count'] += 1
+                s['object_shard_count'] += objects
+                s['bytes'] += int(bytes / k)
+                osd_stats[osd] = s
+
+        old_osds = old_pgs[pgid]
+        add_osd_stats(old_osds, old_osd_stats)
+
+        new_osds = new_pgs[pgid]
+        add_osd_stats(new_osds, new_osd_stats)
+
+        if old_osds == new_osds:
             continue
 
         old_count = diff_pg_shard_count
@@ -333,6 +385,57 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
         if verbose:
             print("{}\t{} -> {}".format(pgid, old_pgs[pgid], new_pgs[pgid]),
                   file=sys.stderr, flush=True)
+
+    estat = {
+        'shard_count' : 0,
+        'object_shard_count' : 0,
+        'bytes' : 0
+    }
+
+    def calc_host_stats(hosts, osd_stats):
+        host_stats = {}
+
+        for host, osds in hosts.items():
+            s = host_stats[host] = estat.copy()
+            for osd in osds:
+                if osd not in osd_stats:
+                    continue
+                s['shard_count'] += osd_stats[osd]['shard_count']
+                s['object_shard_count'] += osd_stats[osd]['object_shard_count']
+                s['bytes'] += osd_stats[osd]['bytes']
+
+        return host_stats
+
+    old_host_stats = calc_host_stats(old_hosts, old_osd_stats)
+    new_host_stats = calc_host_stats(new_hosts, new_osd_stats)
+
+    old_host_avgs = estat.copy()
+    for host, stat in old_host_stats.items():
+        for k, s in stat.items():
+            old_host_avgs[k] += s
+    for k, s in old_host_avgs.items():
+        old_host_avgs[k] = int(s / len(old_host_stats))
+
+    new_host_avgs = estat.copy()
+    for host, stat in new_host_stats.items():
+        for k, s in stat.items():
+            new_host_avgs[k] += s
+    for k, s in new_host_avgs.items():
+        new_host_avgs[k] = int(s / len(new_host_stats))
+
+    for host in set(list(old_host_stats) + list(new_host_stats)):
+        ostat = old_host_stats.get(host, estat)
+        odevs = {k : "{:.2f}".format(1.0 + (ostat[k] - old_host_avgs[k]) / old_host_avgs[k]) for k in ostat}
+        nstat = new_host_stats.get(host, estat)
+        ndevs = {k : "{:.2f}".format(1.0 + (nstat[k] - new_host_avgs[k]) / old_host_avgs[k]) for k in nstat}
+        dstat = {k : ostat[k] - nstat[k] for k in ostat}
+
+        print("OLD  {} {}".format(host, ostat))
+        print("ODEV {} {}".format(host, odevs))
+        print("NEW  {} {}".format(host, nstat))
+        print("NDEV {} {}".format(host, ndevs))
+        print("DIFF {} {}".format(host, dstat))
+        print("--")
 
     print("{}/{} ({:.2f}%) pg shards to move".format(
         diff_pg_shard_count, total_pg_shard_count,
