@@ -149,6 +149,9 @@ def get_pgmap(pg_dump_file):
 def get_pg_stats(pgmap):
     return {pg['pgid']: pg for pg in pgmap['pg_stats']}
 
+def get_osd_stats(pgmap):
+    return {osd['osd']: osd for osd in pgmap['osd_stats']}
+
 def parse_test_map_pgs_dump(file):
     # Format:
     # pool 1 pg_num 16
@@ -207,8 +210,7 @@ def get_crushmap(file):
     with open(file, "r") as f:
         return json.load(f)
 
-def get_crushmap_hosts(crushmap_json_file):
-    crushmap = get_crushmap(crushmap_json_file)
+def get_crushmap_hosts(crushmap):
     hosts = {}
 
     for b in crushmap['buckets']:
@@ -279,8 +281,15 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
         old_pgs = parse_test_map_pgs_dump(old_test_map_pgs_dump)
         new_pgs = parse_test_map_pgs_dump(new_test_map_pgs_dump)
 
-        old_hosts = get_crushmap_hosts(old_crushmap_json_file)
-        new_hosts = get_crushmap_hosts(new_crushmap_json_file)
+        old_crushmap = get_crushmap(old_crushmap_json_file)
+        new_crushmap = get_crushmap(new_crushmap_json_file)
+
+        old_hosts = get_crushmap_hosts(old_crushmap)
+        new_hosts = get_crushmap_hosts(new_crushmap)
+
+        if verbose:
+            print("old_hosts: {}".format(old_hosts), file=sys.stderr, flush=True)
+            print("new_hosts: {}".format(new_hosts), file=sys.stderr, flush=True)
 
     diff_pg_count = 0
     total_object_count = 0
@@ -317,6 +326,12 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
         100 * diff_object_count / total_object_count \
         if total_object_count else 0), flush=True)
 
+    estat = {
+        'shard_count' : 0,
+        'object_shard_count' : 0,
+        'bytes' : 0
+    }
+
     total_pg_shard_count = 0
     diff_pg_shard_count = 0
     total_object_shard_count = 0
@@ -345,11 +360,7 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
 
         def add_osd_stats(osds, osd_stats):
             for osd in osds:
-                s = osd_stats.get(osd, {
-                    'shard_count' : 0,
-                    'object_shard_count' : 0,
-                    'bytes' : 0
-                })
+                s = osd_stats.get(osd, estat.copy())
                 s['shard_count'] += 1
                 s['object_shard_count'] += objects
                 s['bytes'] += int(bytes / k)
@@ -386,11 +397,36 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
             print("{}\t{} -> {}".format(pgid, old_pgs[pgid], new_pgs[pgid]),
                   file=sys.stderr, flush=True)
 
-    estat = {
-        'shard_count' : 0,
-        'object_shard_count' : 0,
-        'bytes' : 0
-    }
+    if verbose:
+        pgmap_osd_stats = get_osd_stats(pgmap)
+        total_osd_kb = sum([x['kb'] for x in pgmap_osd_stats.values()])
+
+        old_total_osd_kb_used = sum(x['bytes'] for x in old_osd_stats.values()) / 1024
+        new_total_osd_kb_used = sum(x['bytes'] for x in new_osd_stats.values()) / 1024
+
+        old_avg_util = 1.0 * old_total_osd_kb_used / total_osd_kb \
+            if total_osd_kb else 0
+        new_avg_util = 1.0 * new_total_osd_kb_used / total_osd_kb \
+            if total_osd_kb else 0
+
+        for osd in set(list(old_osd_stats) + list(new_osd_stats)):
+            pstat = pgmap_osd_stats.get(osd)
+            ostat = old_osd_stats.get(osd, estat)
+            outil = ostat['bytes'] / 1024 / pstat['kb'] \
+                if pstat and pstat['kb'] else 0
+            odevs = outil - old_avg_util
+            nstat = new_osd_stats.get(osd, estat)
+            nutil = nstat['bytes'] / 1024 / pstat['kb'] \
+                if pstat and pstat['kb'] else 0
+            ndevs = nutil - new_avg_util
+            dstat = {k : ostat[k] - nstat[k] for k in ostat}
+
+            print("OLD  osd.{} {}".format(osd, ostat))
+            print("NEW  osd.{} {}".format(osd, nstat))
+            print("DIFF osd.{} {}".format(osd, dstat))
+            print("ODEV osd.{} {:.3f}".format(osd, odevs))
+            print("NDEV osd.{} {:.3f}".format(osd, ndevs))
+            print("--")
 
     def calc_host_stats(hosts, osd_stats):
         host_stats = {}
@@ -408,6 +444,10 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
 
     old_host_stats = calc_host_stats(old_hosts, old_osd_stats)
     new_host_stats = calc_host_stats(new_hosts, new_osd_stats)
+
+    if verbose:
+        print("old_host_stats: {}".format(old_host_stats), file=sys.stderr, flush=True)
+        print("new_host_stats: {}".format(new_host_stats), file=sys.stderr, flush=True)
 
     old_host_avgs = estat.copy()
     for host, stat in old_host_stats.items():
@@ -430,11 +470,11 @@ def do_compare(new_crushmap_in, osdmap=None, pg_dump=None, compiled=False,
         ndevs = {k : "{:.2f}".format(1.0 + (nstat[k] - new_host_avgs[k]) / old_host_avgs[k]) for k in nstat}
         dstat = {k : ostat[k] - nstat[k] for k in ostat}
 
-        print("OLD  {} {}".format(host, ostat))
-        print("ODEV {} {}".format(host, odevs))
-        print("NEW  {} {}".format(host, nstat))
-        print("NDEV {} {}".format(host, ndevs))
-        print("DIFF {} {}".format(host, dstat))
+        print("OLD  host {} {}".format(host, ostat))
+        print("ODEV host {} {}".format(host, odevs))
+        print("NEW  host {} {}".format(host, nstat))
+        print("NDEV host {} {}".format(host, ndevs))
+        print("DIFF host {} {}".format(host, dstat))
         print("--")
 
     print("{}/{} ({:.2f}%) pg shards to move".format(
