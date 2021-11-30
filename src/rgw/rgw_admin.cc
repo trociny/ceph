@@ -7408,13 +7408,23 @@ next:
   }
 
   if (opt_cmd == OPT::LC_PROCESS) {
-    int ret = store->getRados()->process_lc(bucket_name);
+    if ((! bucket_name.empty()) ||
+	(! bucket_id.empty())) {
+        RGWBucketInfo bucket_info;
+        int ret = init_bucket(tenant, bucket_name, bucket_id, bucket_info, bucket);
+	if (ret < 0) {
+	  cerr << "ERROR: could not init bucket: " << cpp_strerror(-ret)
+	       << std::endl;
+	  return ret;
+	}
+    }
+
+    int ret = store->getRados()->process_lc(bucket);
     if (ret < 0) {
       cerr << "ERROR: lc processing returned error: " << cpp_strerror(-ret) << std::endl;
       return 1;
     }
   }
-
 
   if (opt_cmd == OPT::LC_RESHARD_FIX) {
     ret = RGWBucketAdminOp::fix_lc_shards(store, bucket_op, f, dpp());
