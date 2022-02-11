@@ -31,6 +31,7 @@ compare_image_snaps()
     local pool=$1
     local image=$2
     local snap_name=$3
+    local final=$4
     local ret=0
 
     local rmt_export=${TEMPDIR}/${CLUSTER2}-${pool}-${image}.export
@@ -42,6 +43,7 @@ compare_image_snaps()
     if ! cmp ${rmt_export} ${loc_export}
     then
         show_diff ${rmt_export} ${loc_export}
+        test -n "${final}" || compare_image_snapshots ${pool} ${image} ${snap_name} final
         ret=1
     fi
     rm -f ${rmt_export} ${loc_export}
