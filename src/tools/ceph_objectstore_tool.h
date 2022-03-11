@@ -25,6 +25,7 @@ class ObjectStoreTool : public RadosDump
     {}
 
     int dump_export(Formatter *formatter);
+    int extract_export();
     int do_import(ObjectStore *store, OSDSuperblock& sb, bool force,
 		  std::string pgidstr);
     int do_export(ObjectStore *fs, coll_t coll, spg_t pgid,
@@ -33,6 +34,7 @@ class ObjectStoreTool : public RadosDump
           PastIntervals &past_intervals);
     int dump_object(Formatter *formatter,
 				bufferlist &bl);
+    int extract_object(bufferlist &bl);
     int get_object(
       ObjectStore *store, OSDriver& driver, SnapMapper& mapper, coll_t coll,
       bufferlist &bl, OSDMap &curmap, bool *skipped_objects);

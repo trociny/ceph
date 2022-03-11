@@ -1995,6 +1995,215 @@ int ObjectStoreTool::do_import(ObjectStore *store, OSDSuperblock& sb,
   return 0;
 }
 
+int extract_data(ghobject_t hoid, bufferlist &bl)
+{
+  auto ebliter = bl.cbegin();
+  data_section ds;
+  ds.decode(ebliter);
+
+  if (hoid.hobj.snap != CEPH_NOSNAP) {
+    cerr << "skipping snap " << hoid << std::endl;
+  }
+
+  if (debug) {
+    cerr << hoid << "\tdata: offset " << ds.offset << " len " << ds.len << std::endl;
+  }
+
+  int fd = open(hoid.hobj.oid.name.c_str(), O_WRONLY|O_CREAT|O_LARGEFILE, 0666);
+  if (fd == -1) {
+    cerr << "open " << hoid.hobj.oid.name << " " << cpp_strerror(errno) << std::endl;
+    return -errno;
+  }
+
+  int ret = pwrite(fd, ds.databl.c_str(), ds.len, ds.offset);
+  if (ret == -1) {
+    perror("write");
+    return -errno;
+  }
+
+  close(fd);
+
+  return 0;
+}
+
+int extract_attrs(ghobject_t hoid,  bufferlist &bl)
+{
+  auto ebliter = bl.cbegin();
+  attr_section as;
+  as.decode(ebliter);
+
+  return 0;
+}
+
+int extract_omap_hdr(ghobject_t hoid, bufferlist &bl)
+{
+  auto ebliter = bl.cbegin();
+  omap_hdr_section oh;
+  oh.decode(ebliter);
+
+  return 0;
+}
+
+int extract_omap(ghobject_t hoid, bufferlist &bl)
+{
+  auto ebliter = bl.cbegin();
+  omap_section os;
+  os.decode(ebliter);
+
+  return 0;
+}
+
+int ObjectStoreTool::extract_object(bufferlist &bl)
+{
+  auto ebliter = bl.cbegin();
+  object_begin ob;
+  ob.decode(ebliter);
+
+  if (ob.hoid.hobj.is_temp()) {
+    cerr << "ERROR: Export contains temporary object '" << ob.hoid << "'" << std::endl;
+    return -EFAULT;
+  }
+
+  cerr << "Write " << ob.hoid << std::endl;
+
+  bufferlist ebl;
+  bool done = false;
+  while(!done) {
+    sectiontype_t type;
+    int ret = read_section(&type, &ebl);
+    if (ret)
+      return ret;
+
+    //cout << "\tdo_object: Section type " << hex << type << dec << std::endl;
+    //cout << "\t\tsection size " << ebl.length() << std::endl;
+    if (type >= END_OF_TYPES) {
+      cout << "Skipping unknown object section type" << std::endl;
+      continue;
+    }
+    switch(type) {
+    case TYPE_DATA:
+      ret = extract_data(ob.hoid, ebl);
+      if (ret) return ret;
+      break;
+    case TYPE_ATTRS:
+      ret = extract_attrs(ob.hoid, ebl);
+      if (ret) return ret;
+      break;
+    case TYPE_OMAP_HDR:
+      ret = extract_omap_hdr(ob.hoid, ebl);
+      if (ret) return ret;
+      break;
+    case TYPE_OMAP:
+      ret = extract_omap(ob.hoid, ebl);
+      if (ret) return ret;
+      break;
+    case TYPE_OBJECT_END:
+      done = true;
+      break;
+    default:
+      cerr << "Unknown section type " << type << std::endl;
+      return -EFAULT;
+    }
+  }
+  return 0;
+}
+
+int extract_pg_metadata(bufferlist &bl)
+{
+  metadata_section ms;
+  auto ebliter = bl.cbegin();
+  ms.decode(ebliter);
+
+  return 0;
+}
+
+int ObjectStoreTool::extract_export()
+{
+  bufferlist ebl;
+
+  int ret = read_super();
+  if (ret)
+    return ret;
+
+  if (sh.magic != super_header::super_magic) {
+    cerr << "Invalid magic number" << std::endl;
+    return -EFAULT;
+  }
+
+  if (sh.version > super_header::super_ver) {
+    cerr << "Can't handle export format version=" << sh.version << std::endl;
+    return -EINVAL;
+  }
+
+  //First section must be TYPE_PG_BEGIN
+  sectiontype_t type;
+  ret = read_section(&type, &ebl);
+  if (ret)
+    return ret;
+  if (type == TYPE_POOL_BEGIN) {
+    cerr << "Pool exports cannot be imported into a PG" << std::endl;
+    return -EINVAL;
+  } else if (type != TYPE_PG_BEGIN) {
+    cerr << "Invalid first section type " << std::to_string(type) << std::endl;
+    return -EFAULT;
+  }
+
+  auto ebliter = ebl.cbegin();
+  pg_begin pgb;
+  pgb.decode(ebliter);
+  spg_t pgid = pgb.pgid;
+
+  if (debug) {
+    cerr << "Exported features: " << pgb.superblock.compat_features << std::endl;
+  }
+
+  cout << "Extracting pgid " << pgid;
+  cout << std::endl;
+
+  bool done = false;
+  bool found_metadata = false;
+  metadata_section ms;
+  while(!done) {
+    ret = read_section(&type, &ebl);
+    if (ret)
+      return ret;
+
+    if (debug) {
+      cout << __func__ << ": Section type " << std::to_string(type) << std::endl;
+    }
+    if (type >= END_OF_TYPES) {
+      cout << "Skipping unknown section type" << std::endl;
+      continue;
+    }
+    switch(type) {
+    case TYPE_OBJECT_BEGIN:
+      ceph_assert(found_metadata);
+      ret = extract_object(ebl);
+      if (ret) return ret;
+      break;
+    case TYPE_PG_METADATA:
+      ret = extract_pg_metadata(ebl);
+      if (ret) return ret;
+      found_metadata = true;
+      break;
+    case TYPE_PG_END:
+      ceph_assert(found_metadata);
+      done = true;
+      break;
+    default:
+      cerr << "Unknown section type " << std::to_string(type) << std::endl;
+      return -EFAULT;
+    }
+  }
+
+  if (!found_metadata) {
+    cerr << "Missing metadata section" << std::endl;
+    return -EFAULT;
+  }
+
+  return 0;
+}
+
 int do_list(ObjectStore *store, string pgidstr, string object, boost::optional<std::string> nspace,
 	    Formatter *formatter, bool debug, bool human_readable, bool head)
 {
@@ -3224,7 +3433,7 @@ int main(int argc, char **argv)
      "Pool name, mandatory for apply-layout-settings if --pgid is not specified")
     ("op", po::value<string>(&op),
      "Arg is one of [info, log, remove, mkfs, fsck, repair, fuse, dup, export, export-remove, import, list, list-slow-omap, fix-lost, list-pgs, dump-journal, dump-super, meta-list, "
-     "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, reset-last-complete, apply-layout-settings, update-mon-db, dump-export, trim-pg-log, statfs]")
+     "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, reset-last-complete, apply-layout-settings, update-mon-db, dump-export, extract-export, trim-pg-log, statfs]")
     ("epoch", po::value<unsigned>(&epoch),
      "epoch# for get-osdmap and get-inc-osdmap, the current epoch in use if not specified")
     ("file", po::value<string>(&file),
@@ -3364,6 +3573,7 @@ int main(int argc, char **argv)
   }
   if (!vm.count("data-path") &&
      op != "dump-export" &&
+     op != "extract-export" &&
      !(op == "dump-journal" && type == "filestore")) {
     cerr << "Must provide --data-path" << std::endl;
     usage(desc);
@@ -3412,7 +3622,7 @@ int main(int argc, char **argv)
     } else {
       file_fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0666);
     }
-  } else if (op == "import" || op == "dump-export" || op == "set-osdmap" || op == "set-inc-osdmap") {
+  } else if (op == "import" || op == "dump-export" || op == "extract-export" || op == "set-osdmap" || op == "set-inc-osdmap") {
     if (!vm.count("file") || file == "-") {
       if (isatty(STDIN_FILENO)) {
         cerr << "stdin is a tty and no --file filename specified" << std::endl;
@@ -3427,7 +3637,7 @@ int main(int argc, char **argv)
   ObjectStoreTool tool = ObjectStoreTool(file_fd, dry_run);
 
   if (vm.count("file") && file_fd == fd_none && !dry_run) {
-    cerr << "--file option only applies to import, dump-export, export, export-remove, "
+    cerr << "--file option only applies to import, dump-export, extract-export, export, export-remove, "
 	 << "get-osdmap, set-osdmap, get-inc-osdmap or set-inc-osdmap" << std::endl;
     return 1;
   }
@@ -3484,6 +3694,16 @@ int main(int argc, char **argv)
     int ret = tool.dump_export(formatter);
     if (ret < 0) {
       cerr << "dump-export: "
+	   << cpp_strerror(ret) << std::endl;
+      return 1;
+    }
+    return 0;
+  }
+
+  if (op == "extract-export") {
+    int ret = tool.extract_export();
+    if (ret < 0) {
+      cerr << "extract-export: "
 	   << cpp_strerror(ret) << std::endl;
       return 1;
     }
@@ -4022,7 +4242,7 @@ int main(int argc, char **argv)
   // before complaining about a bad pgid
   if (!vm.count("objcmd") && op != "export" && op != "export-remove" && op != "info" && op != "log" && op != "mark-complete" && op != "trim-pg-log") {
     cerr << "Must provide --op (info, log, remove, mkfs, fsck, repair, export, export-remove, import, list, fix-lost, list-pgs, dump-journal, dump-super, meta-list, "
-      "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, reset-last-complete, dump-export, trim-pg-log, statfs)"
+      "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, reset-last-complete, dump-export, extract-export, trim-pg-log, statfs)"
 	 << std::endl;
     usage(desc);
     ret = 1;
