@@ -118,6 +118,12 @@ add_executable(ceph-authtool ${ceph_authtool_srcs})
 target_link_libraries(ceph-authtool global ${EXTRALIBS} ${CRYPTO_LIBS})
 install(TARGETS ceph-authtool DESTINATION bin)
 
+set(rgw_gc_queue_list_entries_srcs
+  rgw_gc_queue_list_entries.cc
+)
+add_executable(rgw-gc-queue-list-entries ${rgw_gc_queue_list_entries_srcs})
+target_link_libraries(rgw-gc-queue-list-entries common global)
+
 if(WITH_TESTS)
 set(ceph_dedup_tool_srcs ceph_dedup_tool.cc)
 add_executable(ceph-dedup-tool ${ceph_dedup_tool_srcs})
