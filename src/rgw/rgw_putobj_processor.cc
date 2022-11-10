@@ -13,6 +13,7 @@
  *
  */
 
+#include "include/scope_guard.h"
 #include "rgw_aio.h"
 #include "rgw_putobj_processor.h"
 #include "rgw_multi.h"
@@ -330,6 +331,37 @@ int AtomicObjectProcessor::complete(size_t accounted_size,
 }
 
 
+int MultipartObjectProcessor::MPSerializer::try_lock(
+  const std::string& _oid, utime_t dur) {
+  ceph_assert(!locked);
+
+  oid = _oid;
+
+  librados::ObjectWriteOperation op;
+  op.assert_exists();
+  lock.set_duration(dur);
+  lock.lock_exclusive(&op);
+  utime_t time_to_giveup = ceph_clock_now() + dur;
+  int ret;
+  do {
+    ret = ioctx.operate(oid, &op);
+    if (ret == 0) {
+      locked = true;
+      break;
+    }
+  } while (ret == -EBUSY || ceph_clock_now() > time_to_giveup);
+  return ret;
+}
+
+int MultipartObjectProcessor::MPSerializer::unlock() {
+  ceph_assert(locked);
+  int ret = lock.unlock(&ioctx, oid);
+  if (ret == 0) {
+    locked = false;
+  }
+  return ret;
+}
+
 int MultipartObjectProcessor::process_first_chunk(bufferlist&& data,
                                                   DataProcessor **processor)
 {
@@ -473,6 +505,24 @@ int MultipartObjectProcessor::complete(size_t accounted_size,
   meta_obj.init_ns(bucket_info.bucket, mp.get_meta(), RGW_OBJ_NS_MULTIPART);
   meta_obj.set_in_extra_data(true);
 
+  /* take a cls lock on meta_obj to prevent racing retries */
+  rgw_pool meta_pool;
+  rgw_raw_obj raw_obj;
+  int max_lock_secs_mp =
+    store->ctx()->_conf.get_val<int64_t>("rgw_mp_lock_max_time");
+  utime_t dur(max_lock_secs_mp, 0);
+
+  store->obj_to_raw(bucket_info.placement_rule, meta_obj, &raw_obj);
+  store->get_obj_data_pool(bucket_info.placement_rule, meta_obj, &meta_pool);
+  store->open_pool_ctx(meta_pool, serializer.ioctx, true);
+  r = serializer.try_lock(raw_obj.oid, dur);
+  if (r < 0) {
+    ldout(store->ctx(), 1) << "failed to acquire lock" << dendl;
+    return r == -ENOENT ? -ERR_NO_SUCH_UPLOAD : r;
+  }
+
+  auto sg = make_scope_guard([this](){ serializer.unlock();} );
+
   rgw_raw_obj raw_meta_obj;
 
   store->obj_to_raw(bucket_info.placement_rule, meta_obj, &raw_meta_obj);
@@ -480,16 +530,24 @@ int MultipartObjectProcessor::complete(size_t accounted_size,
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
   auto sysobj = obj_ctx.get_obj(raw_meta_obj);
 
-  r = sysobj.omap()
-      .set_must_exist(true)
-      .set(p, bl);
+  std::map<string, bufferlist> m;
+  r = sysobj.omap().get_all(&m);
   if (r < 0) {
-    return r == -ENOENT ? -ERR_NO_SUCH_UPLOAD : r;
+    return r;
   }
 
-  if (!obj_op.meta.canceled) {
-    // on success, clear the set of objects for deletion
-    writer.clear_written();
+  if (m.count(p)) {
+    ldout(store->ctx(), 5) << "racing retry" << dendl;
+  } else {
+    r = sysobj.omap().set(p, bl);
+    if (r < 0) {
+      return r;
+    }
+
+    if (!obj_op.meta.canceled) {
+      // on success, clear the set of objects for deletion
+      writer.clear_written();
+    }
   }
   if (pcanceled) {
     *pcanceled = obj_op.meta.canceled;

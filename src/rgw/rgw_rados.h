@@ -1156,6 +1156,12 @@ struct tombstone_entry {
 
 class RGWIndexCompletionManager;
 
+namespace rgw {
+namespace putobj {
+  class MultipartObjectProcessor;
+}
+}
+
 class RGWRados : public AdminSocketHook
 {
   friend class RGWGC;
@@ -1170,6 +1176,7 @@ class RGWRados : public AdminSocketHook
   friend class RGWBucketReshardLock;
   friend class BucketIndexLockGuard;
   friend class RGWCompleteMultipart;
+  friend class rgw::putobj::MultipartObjectProcessor;
 
   static constexpr const char* admin_commands[4][3] = {
     { "cache list",

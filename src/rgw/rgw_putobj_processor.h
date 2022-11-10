@@ -17,6 +17,8 @@
 
 #include <optional>
 
+#include "include/rados/librados.hpp"
+#include "cls/lock/cls_lock_client.h"
 #include "rgw_putobj.h"
 #include "rgw_rados.h"
 #include "services/svc_rados.h"
@@ -195,6 +197,19 @@ class MultipartObjectProcessor : public ManifestObjectProcessor {
   const int part_num;
   const std::string part_num_str;
   RGWMPObj mp;
+
+  struct MPSerializer {
+    librados::IoCtx ioctx;
+    rados::cls::lock::Lock lock;
+    std::string oid;
+    bool locked = false;
+
+    MPSerializer() : lock("MultipartObjectProcessor"), locked(false) {
+    }
+
+    int try_lock(const std::string& oid, utime_t dur);
+    int unlock();
+  } serializer;
 
   // write the first chunk and wait on aio->drain() for its completion.
   // on EEXIST, retry with random prefix
