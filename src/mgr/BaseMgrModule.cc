@@ -412,7 +412,10 @@ ceph_option_get(BaseMgrModule *self, PyObject *args)
   const Option *opt = g_conf().find_option(string(what));
   if (opt) {
     std::string value;
-    switch (int r = g_conf().get_val(string(what), &value); r) {
+    without_gil_t no_gil;
+    int r = g_conf().get_val(string(what), &value);
+    no_gil.acquire_gil();
+    switch (r) {
     case -ENOMEM:
       PyErr_NoMemory();
       return nullptr;

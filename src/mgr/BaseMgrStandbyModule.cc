@@ -110,7 +110,9 @@ ceph_option_get(BaseMgrStandbyModule *self, PyObject *args)
   }
 
   std::string value;
+  without_gil_t no_gil;
   int r = g_conf().get_val(string(what), &value);
+  no_gil.acquire_gil();
   if (r >= 0) {
     dout(10) << "ceph_option_get " << what << " found: " << value << dendl;
     return PyUnicode_FromString(value.c_str());

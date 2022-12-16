@@ -187,7 +187,9 @@ void ActivePyModules::update_cache_metrics() {
 
 PyObject *ActivePyModules::cacheable_get_python(const std::string &what)
 {
+  without_gil_t no_gil;
   uint64_t ttl_seconds = g_conf().get_val<uint64_t>("mgr_ttl_cache_expire_seconds");
+  no_gil.acquire_gil();
   if(ttl_seconds > 0) {
     ttl_cache.set_ttl(ttl_seconds);
     try{
@@ -208,7 +210,9 @@ PyObject *ActivePyModules::cacheable_get_python(const std::string &what)
 
 PyObject *ActivePyModules::get_python(const std::string &what)
 {
+  without_gil_t no_gil;
   uint64_t ttl_seconds = g_conf().get_val<uint64_t>("mgr_ttl_cache_expire_seconds");
+  no_gil.acquire_gil();
 
   PyFormatter pf;
   PyJSONFormatter jf;
@@ -259,10 +263,13 @@ PyObject *ActivePyModules::get_python(const std::string &what)
     }
     f.close_section();
   } else if (what.substr(0, 6) == "config") {
+    without_gil_t no_gil;
+    ConfigProxy config{g_conf()};
+    no_gil.acquire_gil();
     if (what == "config_options") {
-      g_conf().config_options(&f);
+      config.config_options(&f);
     } else if (what == "config") {
-      g_conf().show_config(&f);
+      config.show_config(&f);
     }
   } else if (what == "mon_map") {
     without_gil_t no_gil;
