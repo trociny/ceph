@@ -606,7 +606,7 @@
                              ])
   
   Optional arguments
-    -t [ --device-type ] arg device type [ggate, krbd (default), nbd, ubbd]
+    -t [ --device-type ] arg device type [ggate, krbd (default), nbd, ubbd, ublk]
     -p [ --pool ] arg        pool name
     --namespace arg          namespace name
     --image arg              image name
@@ -637,7 +637,8 @@
                                     p-name>] or <device-path>
   
   Optional arguments
-    -t [ --device-type ] arg        device type [ggate, krbd (default), nbd, ubbd]
+    -t [ --device-type ] arg        device type [ggate, krbd (default), nbd,
+                                    ubbd, ublk]
     -p [ --pool ] arg               pool name
     --namespace arg                 namespace name
     --image arg                     image name
@@ -652,7 +653,7 @@
   List mapped rbd images.
   
   Optional arguments
-    -t [ --device-type ] arg device type [ggate, krbd (default), nbd, ubbd]
+    -t [ --device-type ] arg device type [ggate, krbd (default), nbd, ubbd, ublk]
     --format arg             output format (plain, json, or xml) [default: plain]
     --pretty-format          pretty formatting (json and xml)
   
@@ -674,7 +675,7 @@
                              ])
   
   Optional arguments
-    -t [ --device-type ] arg device type [ggate, krbd (default), nbd, ubbd]
+    -t [ --device-type ] arg device type [ggate, krbd (default), nbd, ubbd, ublk]
     -p [ --pool ] arg        pool name
     --namespace arg          namespace name
     --image arg              image name
@@ -703,7 +704,8 @@
                                     p-name>] or <device-path>
   
   Optional arguments
-    -t [ --device-type ] arg        device type [ggate, krbd (default), nbd, ubbd]
+    -t [ --device-type ] arg        device type [ggate, krbd (default), nbd,
+                                    ubbd, ublk]
     -p [ --pool ] arg               pool name
     --namespace arg                 namespace name
     --image arg                     image name

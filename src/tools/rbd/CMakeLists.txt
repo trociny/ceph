@@ -53,6 +53,7 @@ set(rbd_srcs
   action/TrashPurgeSchedule.cc
   action/Trash.cc
   action/Ubbd.cc
+  action/Ublk.cc
   action/Watch.cc
   action/Wnbd.cc)
 if(WIN32)
