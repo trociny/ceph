@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+set -ex
+
+# This exercises "rbd device ... --device-type ublk", which is a thin
+# wrapper around ublksrv's "ublk" control binary and its "ublk.rbd" target
+# (see src/tools/rbd/action/Ublk.cc). ublksrv is temporarily vendored and
+# built/packaged by ceph itself (see WITH_RBD_UBLK), but the ublk_drv
+# kernel module is not ceph's to provide -- like "--device-type nbd"
+# depending on the nbd kernel module, it must already be loaded wherever
+# this script runs.
+
+POOL=rbd
+ANOTHER_POOL=new_default_pool$$
+NS=ns
+IMAGE=testrbdublk$$
+SIZE=64
+DATA=
+DEV=
+
+_sudo()
+{
+    local cmd
+
+    if [ `id -u` -eq 0 ]
+    then
+	"$@"
+	return $?
+    fi
+
+    # Look for the command in the user path. If it fails run it as is,
+    # supposing it is in sudo path.
+    cmd=`which $1 2>/dev/null` || cmd=$1
+    shift
+    sudo -nE "${cmd}" "$@"
+}
+
+setup()
+{
+    local ns x
+
+    if [ -e CMakeCache.txt ]; then
+	# running under cmake build dir
+
+	CEPH_SRC=$(readlink -f $(dirname $0)/../../../src)
+	CEPH_ROOT=${PWD}
+	CEPH_BIN=${CEPH_ROOT}/bin
+
+	export LD_LIBRARY_PATH=${CEPH_ROOT}/lib:${LD_LIBRARY_PATH}
+	export PYTHONPATH=${PYTHONPATH}:${CEPH_SRC}/pybind:${CEPH_ROOT}/lib/cython_modules/lib.3
+	PATH=${CEPH_BIN}:${PATH}
+    fi
+
+    _sudo echo test sudo
+
+    trap cleanup INT TERM EXIT
+    TEMPDIR=`mktemp -d`
+    DATA=${TEMPDIR}/data
+    dd if=/dev/urandom of=${DATA} bs=1M count=${SIZE}
+
+    rbd namespace create ${POOL}/${NS}
+
+    for ns in '' ${NS}; do
+        rbd --dest-pool ${POOL} --dest-namespace "${ns}" --no-progress import \
+            ${DATA} ${IMAGE}
+    done
+
+    # create another pool
+    ceph osd pool create ${ANOTHER_POOL} 8
+    rbd pool init ${ANOTHER_POOL}
+}
+
+function cleanup()
+{
+    local ns s
+
+    set +e
+
+    # if a test aborted (e.g. via set -e) while DEV was still mounted --
+    # possibly quiesced/frozen by a quiesce-hook test -- unmapping a still
+    # mounted/frozen device can hang indefinitely; force-unmount first, the
+    # same defensive step rbd-nbd.sh's cleanup() already takes.
+    mount | grep -F ${TEMPDIR}/mnt && _sudo umount -f ${TEMPDIR}/mnt
+
+    if [ -n "${DEV}" ]
+    then
+	_sudo rbd device --device-type ublk unmap ${DEV}
+    fi
+
+    rm -Rf ${TEMPDIR}
+
+    for ns in '' ${NS}; do
+        if rbd -p ${POOL} --namespace "${ns}" status ${IMAGE} 2>/dev/null; then
+	    for s in 0.5 1 2 4 8 16 32; do
+	        sleep $s
+	        rbd -p ${POOL} --namespace "${ns}" status ${IMAGE} |
+                    grep 'Watchers: none' && break
+	    done
+	    rbd -p ${POOL} --namespace "${ns}" snap purge ${IMAGE}
+	    rbd -p ${POOL} --namespace "${ns}" remove ${IMAGE}
+        fi
+    done
+    rbd namespace remove ${POOL}/${NS}
+
+    # cleanup/reset default pool
+    rbd config global rm global rbd_default_pool
+    ceph osd pool delete ${ANOTHER_POOL} ${ANOTHER_POOL} --yes-i-really-really-mean-it
+}
+
+function expect_false()
+{
+  if "$@"; then return 1; else return 0; fi
+}
+
+# devices are always mapped via _sudo (map requires root, see the "exit
+# status test" below), so they only show up in "device list" to a caller
+# who can see root-owned/privileged ublk devices -- the kernel hides a
+# privileged device's info from an unprivileged, non-owning caller
+# entirely, rather than just restricting some fields. Listing must go
+# through _sudo too, or these helpers silently see an empty list instead
+# of the real one.
+function get_pid()
+{
+    local pool=$1
+    local ns=$2
+
+    PID=$(_sudo rbd device --device-type ublk --format xml list | xmlstarlet sel -t -v \
+      "//devices/device[pool='${pool}'][namespace='${ns}'][image='${IMAGE}'][device='${DEV}']/daemon_pid")
+    test -n "${PID}" || return 1
+    ps -p ${PID} -C ublk.rbd
+}
+
+unmap_device()
+{
+    local args=$1
+    local pid=$2
+
+    _sudo rbd device --device-type ublk unmap ${args}
+    _sudo rbd device --device-type ublk list | expect_false grep -w "${pid}" || return 1
+    ps -C ublk.rbd | expect_false grep -w "${pid}" || return 1
+
+    # workaround possible race between unmap and following map
+    sleep 0.5
+}
+
+#
+# main
+#
+
+setup
+
+# exit status test
+if [ `id -u` -ne 0 ]
+then
+    expect_false rbd device --device-type ublk map ${IMAGE}
+fi
+expect_false _sudo rbd device --device-type ublk map INVALIDIMAGE
+
+# list format test
+expect_false rbd device --device-type ublk --format INVALID list
+rbd device --device-type ublk --format json --pretty-format list
+rbd device --device-type ublk --format xml list
+
+# map test
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}`
+get_pid ${POOL}
+_sudo rbd device --device-type ublk list | grep "${IMAGE}"
+
+# read test
+[ "`dd if=${DATA} bs=1M | md5sum`" = "`_sudo dd if=${DEV} bs=1M | md5sum`" ]
+
+# write test
+dd if=/dev/urandom of=${DATA} bs=1M count=${SIZE}
+_sudo dd if=${DATA} of=${DEV} bs=1M oflag=direct
+[ "`dd if=${DATA} bs=1M | md5sum`" = "`rbd -p ${POOL} --no-progress export ${IMAGE} - | md5sum`" ]
+unmap_device ${DEV} ${PID}
+
+# notrim test
+DEV=`_sudo rbd device --device-type ublk --options notrim map ${POOL}/${IMAGE}`
+get_pid ${POOL}
+provisioned=`rbd -p ${POOL} --format xml du ${IMAGE} |
+  xmlstarlet sel -t -m "//stats/images/image/provisioned_size" -v .`
+used=`rbd -p ${POOL} --format xml du ${IMAGE} |
+  xmlstarlet sel -t -m "//stats/images/image/used_size" -v .`
+[ "${used}" -eq "${provisioned}" ]
+# should fail discard as at time of mapping notrim was used
+expect_false _sudo blkdiscard ${DEV}
+sync
+provisioned=`rbd -p ${POOL} --format xml du ${IMAGE} |
+  xmlstarlet sel -t -m "//stats/images/image/provisioned_size" -v .`
+used=`rbd -p ${POOL} --format xml du ${IMAGE} |
+  xmlstarlet sel -t -m "//stats/images/image/used_size" -v .`
+[ "${used}" -eq "${provisioned}" ]
+unmap_device ${DEV} ${PID}
+
+# trim test
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}`
+get_pid ${POOL}
+provisioned=`rbd -p ${POOL} --format xml du ${IMAGE} |
+  xmlstarlet sel -t -m "//stats/images/image/provisioned_size" -v .`
+used=`rbd -p ${POOL} --format xml du ${IMAGE} |
+  xmlstarlet sel -t -m "//stats/images/image/used_size" -v .`
+[ "${used}" -eq "${provisioned}" ]
+# should honor discard as at time of mapping trim was considered by default
+_sudo blkdiscard ${DEV}
+sync
+provisioned=`rbd -p ${POOL} --format xml du ${IMAGE} |
+  xmlstarlet sel -t -m "//stats/images/image/provisioned_size" -v .`
+used=`rbd -p ${POOL} --format xml du ${IMAGE} |
+  xmlstarlet sel -t -m "//stats/images/image/used_size" -v .`
+[ "${used}" -lt "${provisioned}" ]
+unmap_device ${DEV} ${PID}
+
+# read-only option test
+DEV=`_sudo rbd device --device-type ublk map --read-only ${POOL}/${IMAGE}`
+get_pid ${POOL}
+
+_sudo dd if=${DEV} of=/dev/null bs=1M
+expect_false _sudo dd if=${DATA} of=${DEV} bs=1M oflag=direct
+unmap_device ${DEV} ${PID}
+
+# exclusive option test
+DEV=`_sudo rbd device --device-type ublk map --exclusive ${POOL}/${IMAGE}`
+get_pid ${POOL}
+
+_sudo dd if=${DATA} of=${DEV} bs=1M oflag=direct
+expect_false timeout 10 \
+	rbd bench ${IMAGE} --io-type write --io-size=1024 --io-total=1024
+unmap_device ${DEV} ${PID}
+DEV=
+rbd bench ${IMAGE} --io-type write --io-size=1024 --io-total=1024
+
+# unmap by image name test
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}`
+get_pid ${POOL}
+unmap_device ${IMAGE} ${PID}
+DEV=
+
+# map/unmap snap test
+rbd snap create ${POOL}/${IMAGE}@snap
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}@snap`
+get_pid ${POOL}
+unmap_device "${IMAGE}@snap" ${PID}
+DEV=
+
+# map/unmap snap test with --snap-id
+SNAPID=`rbd snap ls ${POOL}/${IMAGE} | awk '$2 == "snap" {print $1}'`
+DEV=`_sudo rbd device --device-type ublk map --snap-id ${SNAPID} ${POOL}/${IMAGE}`
+get_pid ${POOL}
+unmap_device "--snap-id ${SNAPID} ${IMAGE}" ${PID}
+DEV=
+
+# map/unmap namespace test
+rbd snap create ${POOL}/${NS}/${IMAGE}@snap
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${NS}/${IMAGE}@snap`
+get_pid ${POOL} ${NS}
+unmap_device "${POOL}/${NS}/${IMAGE}@snap" ${PID}
+DEV=
+
+# map/unmap namespace test with --snap-id
+SNAPID=`rbd snap ls ${POOL}/${NS}/${IMAGE} | awk '$2 == "snap" {print $1}'`
+DEV=`_sudo rbd device --device-type ublk map --snap-id ${SNAPID} ${POOL}/${NS}/${IMAGE}`
+get_pid ${POOL} ${NS}
+unmap_device "--snap-id ${SNAPID} ${POOL}/${NS}/${IMAGE}" ${PID}
+DEV=
+
+# map/unmap namespace using options test
+DEV=`_sudo rbd device --device-type ublk map --pool ${POOL} --namespace ${NS} --image ${IMAGE}`
+get_pid ${POOL} ${NS}
+unmap_device "--pool ${POOL} --namespace ${NS} --image ${IMAGE}" ${PID}
+DEV=`_sudo rbd device --device-type ublk map --pool ${POOL} --namespace ${NS} --image ${IMAGE} --snap snap`
+get_pid ${POOL} ${NS}
+unmap_device "--pool ${POOL} --namespace ${NS} --image ${IMAGE} --snap snap" ${PID}
+DEV=
+
+# unmap by image name test 2
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}`
+get_pid ${POOL}
+pid=$PID
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${NS}/${IMAGE}`
+get_pid ${POOL} ${NS}
+unmap_device ${POOL}/${NS}/${IMAGE} ${PID}
+DEV=
+unmap_device ${POOL}/${IMAGE} ${pid}
+
+# map/unmap test with just image name and expect image to come from default pool
+if [ "${POOL}" = "rbd" ];then
+    DEV=`_sudo rbd device --device-type ublk map ${IMAGE}`
+    get_pid ${POOL}
+    unmap_device ${IMAGE} ${PID}
+    DEV=
+fi
+
+# map/unmap test with just image name after changing default pool
+rbd config global set global rbd_default_pool ${ANOTHER_POOL}
+rbd create --size 10M ${IMAGE}
+DEV=`_sudo rbd device --device-type ublk map ${IMAGE}`
+get_pid ${ANOTHER_POOL}
+unmap_device ${IMAGE} ${PID}
+DEV=
+
+# reset
+rbd config global rm global rbd_default_pool
+
+# auto unmap test
+# ublksrv's framework deliberately ignores plain SIGTERM for backgrounded
+# daemons (see sig_handler()/setup_pthread_sigmask() in
+# targets/ublksrv_tgt.cpp) to avoid an accidental signal tearing down a
+# live block device -- only SIGKILL or a proper "ublk del" actually stops
+# it, unlike rbd-nbd where killing the daemon immediately drops the nbd
+# socket. Use SIGKILL here to exercise the kernel's/ublk_drv's detection
+# of an unexpectedly-dead daemon.
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}`
+get_pid ${POOL}
+_sudo kill -9 ${PID}
+for i in `seq 10`; do
+  rbd device --device-type ublk list | expect_false grep -w "${IMAGE}" && break
+  sleep 1
+done
+rbd device --device-type ublk list | expect_false grep -w "${IMAGE}"
+DEV=
+
+# quiesce is not implemented for ublk (there is no ublk-side hook mechanism),
+# but --quiesce/--quiesce-hook are still accepted for cross-device-type
+# script compatibility -- map should succeed with just a warning rather than
+# failing outright
+DEV=`_sudo rbd device --device-type ublk map --quiesce ${POOL}/${IMAGE} 2>/dev/null`
+get_pid ${POOL}
+unmap_device ${DEV} ${PID}
+DEV=
+
+# attach/detach are not supported for ublk
+expect_false _sudo rbd device --device-type ublk attach --device /dev/ublkb0 ${POOL}/${IMAGE}
+expect_false _sudo rbd device --device-type ublk detach ${POOL}/${IMAGE}
+
+echo OK
