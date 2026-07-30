@@ -40,6 +40,7 @@ namespace {
 struct MappedDevice {
   int dev_id = -1;
   int daemon_pid = -1;
+  std::string state;
   std::string devpath;
   std::string pool_name;
   std::string nspace_name;
@@ -192,13 +193,19 @@ int list_ublk_rbd_devices(std::vector<MappedDevice> *devices) {
     MappedDevice d;
 
     // the target JSON can outlive a daemon that was killed rather than
-    // cleanly unmapped (e.g. SIGKILL) -- only list devices with a live
-    // daemon behind them.
+    // cleanly unmapped (e.g. SIGKILL) -- skip those (DEAD, or FAIL_IO
+    // without a cooperating daemon), but keep QUIESCED ones: that's the
+    // state a device added with "-r 1" (user recovery) lands in when its
+    // daemon dies unexpectedly, and it's recoverable via "ublk recover"
+    // (see execute_recover()), so it should stay visible for users to spot
+    // and recover by id rather than being silently dropped from the list.
     std::smatch pm;
-    if (!std::regex_search(block, pm, pid_re) || pm[2] != "LIVE") {
+    if (!std::regex_search(block, pm, pid_re) ||
+        (pm[2] != "LIVE" && pm[2] != "QUIESCED")) {
       continue;
     }
     d.daemon_pid = std::stoi(pm[1]);
+    d.state = pm[2];
 
     d.dev_id = starts[idx].first;
     d.devpath = "/dev/ublkb" + std::to_string(d.dev_id);
@@ -289,11 +296,17 @@ int execute_list(const po::variables_map &vm,
       formatter->dump_string("snap", snap);
       formatter->dump_string("device", d.devpath);
       formatter->dump_int("daemon_pid", d.daemon_pid);
+      formatter->dump_string("state", d.state);
       formatter->close_section();
     } else {
       should_print = true;
+      // a QUIESCED device's daemon is dead (only recoverable via "rbd
+      // device recover"), so blank out the pid rather than showing a pid
+      // that no longer refers to a running process.
+      std::string pid = (d.state == "LIVE") ?
+        std::to_string(d.daemon_pid) : "-";
       tbl << d.dev_id << d.pool_name << d.nspace_name << d.image_name
-          << (snap.empty() ? "-" : snap) << d.devpath << d.daemon_pid
+          << (snap.empty() ? "-" : snap) << d.devpath << pid
           << TextTable::endrow;
     }
   }
@@ -332,9 +345,12 @@ int execute_map(const po::variables_map &vm,
   }
   utils::normalize_pool_name(&pool_name);
 
+  // enable ublk's user-recovery feature so a dead daemon's device can be
+  // reattached via "rbd device recover" instead of having to be re-mapped.
   std::vector<std::string> args = {"add", "-t", "rbd",
                                    "--pool", pool_name,
-                                   "--image", image_name};
+                                   "--image", image_name,
+                                   "-r", "1"};
   if (!nspace_name.empty()) {
     args.push_back("--namespace");
     args.push_back(nspace_name);
@@ -454,6 +470,20 @@ int execute_detach(const po::variables_map &vm,
                    const std::vector<std::string> &ceph_global_init_args) {
   std::cerr << "rbd: ublk device does not support detach" << std::endl;
   return -EOPNOTSUPP;
+}
+
+int execute_recover(const po::variables_map &vm,
+                    const std::vector<std::string> &ceph_global_init_args) {
+  std::string dev_id_str = utils::get_positional_argument(vm, 0);
+  if (dev_id_str.empty() ||
+      dev_id_str.find_first_not_of("0123456789") != std::string::npos) {
+    std::cerr << "rbd: recover requires a device id" << std::endl;
+    return -EINVAL;
+  }
+
+  std::string output;
+  return call_ublk_cmd({"recover", "-n", dev_id_str}, SubProcess::KEEP,
+                       &output);
 }
 
 } // namespace ublk

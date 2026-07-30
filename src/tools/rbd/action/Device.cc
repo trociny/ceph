@@ -9,6 +9,9 @@
 
 #include "include/ceph_assert.h"
 
+#include <cerrno>
+#include <iostream>
+
 namespace rbd {
 namespace action {
 
@@ -35,6 +38,14 @@ DECLARE_DEVICE_OPERATIONS(nbd);
 DECLARE_DEVICE_OPERATIONS(wnbd);
 DECLARE_DEVICE_OPERATIONS(ubbd);
 DECLARE_DEVICE_OPERATIONS(ublk);
+
+// recovering a dead-but-recoverable daemon is a ublk-specific concept (see
+// get_device_type()'s users below) -- no other device type implements it,
+// so it isn't part of the common DeviceOperations table.
+namespace ublk {
+int execute_recover(const po::variables_map &vm,
+                    const std::vector<std::string> &ceph_global_args);
+}
 
 namespace device {
 
@@ -281,6 +292,23 @@ int execute_detach(const po::variables_map &vm,
   return (*get_device_operations(vm)->execute_detach)(vm, ceph_global_init_args);
 }
 
+void get_recover_arguments(po::options_description *positional,
+                           po::options_description *options) {
+  add_device_type_option(options);
+  positional->add_options()
+    ("device-id", "device id");
+}
+
+int execute_recover(const po::variables_map &vm,
+                    const std::vector<std::string> &ceph_global_init_args) {
+  if (get_device_type(vm) != DEVICE_TYPE_UBLK) {
+    std::cerr << "rbd: device recover is not supported for this device type"
+              << std::endl;
+    return -EOPNOTSUPP;
+  }
+  return ublk::execute_recover(vm, ceph_global_init_args);
+}
+
 Shell::SwitchArguments switched_arguments({"exclusive", "force", "quiesce",
                                            "read-only", "show-cookie"});
 
@@ -307,6 +335,11 @@ Shell::Action action_attach(
 Shell::Action action_detach(
   {"device", "detach"}, {}, "Detach image from device.", "",
   &get_detach_arguments, &execute_detach);
+
+Shell::Action action_recover(
+  {"device", "recover"}, {},
+  "Recover a device whose daemon died unexpectedly.", "",
+  &get_recover_arguments, &execute_recover);
 
 } // namespace device
 } // namespace action

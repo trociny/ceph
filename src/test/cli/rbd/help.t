@@ -32,6 +32,8 @@
       device detach                     Detach image from device.
       device list (showmapped)          List mapped rbd images.
       device map (map)                  Map an image to a block device.
+      device recover                    Recover a device whose daemon died
+                                        unexpectedly.
       device unmap (unmap)              Unmap a rbd device.
       diff                              Print extents that differ since a
                                         previous snap, or image creation.
@@ -688,6 +690,18 @@
     --quiesce-hook arg       quiesce hook path
     --snap-id arg            snapshot id
     -o [ --options ] arg     device specific options
+  
+  rbd help device recover
+  usage: rbd device recover [--device-type <device-type>] 
+                            <device-id> 
+  
+  Recover a device whose daemon died unexpectedly.
+  
+  Positional arguments
+    <device-id>              device id
+  
+  Optional arguments
+    -t [ --device-type ] arg device type [ggate, krbd (default), nbd, ubbd, ublk]
   
   rbd help device unmap
   usage: rbd device unmap [--device-type <device-type>] [--pool <pool>] 

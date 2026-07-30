@@ -129,6 +129,24 @@ function get_pid()
     ps -p ${PID} -C ublk.rbd
 }
 
+function get_dev_id()
+{
+    local pool=$1
+    local ns=$2
+
+    DEVID=$(_sudo rbd device --device-type ublk --format xml list | xmlstarlet sel -t -v \
+      "//devices/device[pool='${pool}'][namespace='${ns}'][image='${IMAGE}'][device='${DEV}']/id")
+    test -n "${DEVID}"
+}
+
+function get_state()
+{
+    local id=$1
+
+    _sudo rbd device --device-type ublk --format xml list | xmlstarlet sel -t -v \
+      "//devices/device[id='${id}']/state"
+}
+
 unmap_device()
 {
     local args=$1
@@ -301,7 +319,7 @@ DEV=
 # reset
 rbd config global rm global rbd_default_pool
 
-# auto unmap test
+# recovery test
 # ublksrv's framework deliberately ignores plain SIGTERM for backgrounded
 # daemons (see sig_handler()/setup_pthread_sigmask() in
 # targets/ublksrv_tgt.cpp) to avoid an accidental signal tearing down a
@@ -309,14 +327,42 @@ rbd config global rm global rbd_default_pool
 # it, unlike rbd-nbd where killing the daemon immediately drops the nbd
 # socket. Use SIGKILL here to exercise the kernel's/ublk_drv's detection
 # of an unexpectedly-dead daemon.
+#
+# Devices are mapped with ublk user-recovery enabled (see execute_map() in
+# Ublk.cc), so a killed daemon doesn't make the device disappear the way it
+# does for nbd: the kernel instead transitions it to QUIESCED and ublksrv
+# keeps its target metadata around, so it stays visible in "device list"
+# (rather than being silently dropped) until a new daemon reattaches via
+# "device recover".
 DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}`
 get_pid ${POOL}
+get_dev_id ${POOL}
+
+# write a fresh, known pattern right before killing the daemon, rather than
+# relying on whatever ${DATA} happens to hold at this point in the script
+# (earlier tests, e.g. the trim test's blkdiscard, have since changed the
+# image's actual content), so the post-recovery check below is verifying
+# recovery itself, not leftover state from unrelated tests above.
+dd if=/dev/urandom of=${DATA} bs=1M count=${SIZE}
+_sudo dd if=${DATA} of=${DEV} bs=1M oflag=direct
+sync
+
 _sudo kill -9 ${PID}
 for i in `seq 10`; do
-  rbd device --device-type ublk list | expect_false grep -w "${IMAGE}" && break
+  [ "`get_state ${DEVID}`" = QUIESCED ] && break
   sleep 1
 done
-rbd device --device-type ublk list | expect_false grep -w "${IMAGE}"
+[ "`get_state ${DEVID}`" = QUIESCED ]
+
+# recover is only supported for ublk
+expect_false _sudo rbd device --device-type nbd recover ${DEVID}
+expect_false _sudo rbd device recover ${DEVID}
+
+_sudo rbd device --device-type ublk recover ${DEVID}
+get_pid ${POOL}
+[ "`get_state ${DEVID}`" = LIVE ]
+[ "`dd if=${DATA} bs=1M | md5sum`" = "`_sudo dd if=${DEV} bs=1M | md5sum`" ]
+unmap_device ${DEV} ${PID}
 DEV=
 
 # quiesce is not implemented for ublk (there is no ublk-side hook mechanism),
