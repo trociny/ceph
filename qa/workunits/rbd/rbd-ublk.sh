@@ -365,12 +365,78 @@ get_pid ${POOL}
 unmap_device ${DEV} ${PID}
 DEV=
 
-# quiesce is not implemented for ublk (there is no ublk-side hook mechanism),
-# but --quiesce/--quiesce-hook are still accepted for cross-device-type
-# script compatibility -- map should succeed with just a warning rather than
-# failing outright
-DEV=`_sudo rbd device --device-type ublk map --quiesce ${POOL}/${IMAGE} 2>/dev/null`
+# quiesce test
+QUIESCE_HOOK=${TEMPDIR}/quiesce.sh
+DEV=`_sudo rbd device --device-type ublk map --quiesce --quiesce-hook ${QUIESCE_HOOK} ${POOL}/${IMAGE}`
 get_pid ${POOL}
+
+# test it fails if the hook does not exist
+test ! -e ${QUIESCE_HOOK}
+expect_false rbd snap create ${POOL}/${IMAGE}@quiesce1
+_sudo dd if=${DATA} of=${DEV} bs=1M count=1 oflag=direct
+
+# test the hook is executed
+touch ${QUIESCE_HOOK}
+chmod +x ${QUIESCE_HOOK}
+cat > ${QUIESCE_HOOK} <<EOF
+#!/bin/sh
+echo "test the hook is executed" >&2
+echo \$1 > ${TEMPDIR}/\$2
+EOF
+rbd snap create ${POOL}/${IMAGE}@quiesce1
+_sudo dd if=${DATA} of=${DEV} bs=1M count=1 oflag=direct
+test "$(cat ${TEMPDIR}/quiesce)" = ${DEV}
+test "$(cat ${TEMPDIR}/unquiesce)" = ${DEV}
+
+# test snap create fails if the hook fails
+cat > ${QUIESCE_HOOK} <<EOF
+#!/bin/sh
+echo "test snap create fails if the hook fails" >&2
+exit 22
+EOF
+expect_false rbd snap create ${POOL}/${IMAGE}@quiesce2
+_sudo dd if=${DATA} of=${DEV} bs=1M count=1 oflag=direct
+
+# test the hook is slow
+cat > ${QUIESCE_HOOK} <<EOF
+#!/bin/sh
+echo "test the hook is slow" >&2
+sleep 7
+EOF
+rbd snap create ${POOL}/${IMAGE}@quiesce2
+_sudo dd if=${DATA} of=${DEV} bs=1M count=1 oflag=direct
+unmap_device ${DEV} ${PID}
+
+# test the rbd-nbd_quiesce hook that comes with the distribution --
+# ublk.rbd defaults --rbd-quiesce-hook to this same script when --quiesce
+# is given without an explicit hook (see execute_map() in Ublk.cc): its
+# "<devpath> <quiesce|unquiesce>" protocol just fsfreezes/-unfreezes
+# whatever is mounted on devpath, which works the same for a ublk device
+# path as it does for an nbd one. The "else" branch below (no CEPH_SRC,
+# i.e. running from installed packages rather than a source build, as
+# on teuthology) relies on that default resolving to an installed file
+# -- the "rbd-nbd" package/subpackage, specifically, since that's the
+# only thing that ships rbd-nbd_quiesce -- so a teuthology suite using
+# this branch needs "rbd-nbd" in its extra_packages even though this is
+# an otherwise-ublk-only test (see qa/suites/rbd/device/workloads/
+# rbd_ublk.yaml). Without it, every quiesce test below fails outright:
+# fork+exec of the missing hook returns ENOENT, which
+# rbd_run_quiesce_hook() unconditionally maps to -EIO, indistinguishable
+# in the logs from a genuine notify-transport failure.
+if [ -n "${CEPH_SRC}" ]; then
+    QUIESCE_HOOK=${CEPH_SRC}/tools/rbd_nbd/rbd-nbd_quiesce
+    DEV=`_sudo rbd device --device-type ublk map --quiesce --quiesce-hook ${QUIESCE_HOOK} \
+               ${POOL}/${IMAGE}`
+else
+    DEV=`_sudo rbd device --device-type ublk map --quiesce ${POOL}/${IMAGE}`
+fi
+get_pid ${POOL}
+_sudo mkfs ${DEV}
+mkdir ${TEMPDIR}/mnt
+_sudo mount ${DEV} ${TEMPDIR}/mnt
+rbd snap create ${POOL}/${IMAGE}@quiesce3
+_sudo dd if=${DATA} of=${TEMPDIR}/mnt/test bs=1M count=1 oflag=direct
+_sudo umount ${TEMPDIR}/mnt
 unmap_device ${DEV} ${PID}
 DEV=
 

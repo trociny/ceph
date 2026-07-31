@@ -1,6 +1,7 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:nil -*-
 // vim: ts=8 sw=2 sts=2 expandtab
 
+#include "acconfig.h"
 #include "tools/rbd/ArgumentTypes.h"
 #include "tools/rbd/Shell.h"
 #include "tools/rbd/Utils.h"
@@ -370,12 +371,16 @@ int execute_map(const po::variables_map &vm,
     args.push_back("--exclusive");
   }
   if (vm["quiesce"].as<bool>()) {
-    std::cerr << "rbd: warning: quiesce is not supported for ublk"
-              << std::endl;
-  }
-  if (vm.count("quiesce-hook")) {
-    std::cerr << "rbd: warning: quiesce-hook is not supported for ublk"
-              << std::endl;
+    // ublk.rbd's own hook-path option is named "--rbd-quiesce-hook" (not
+    // "--quiesce-hook") to avoid confusion with ublk's unrelated QUIESCED
+    // device state. Default to the same hook rbd-nbd uses -- its
+    // <devpath> <quiesce|unquiesce> protocol is device-type-agnostic, so
+    // the existing script works unchanged for a ublk device path too.
+    args.push_back("--rbd-quiesce");
+    args.push_back("--rbd-quiesce-hook");
+    args.push_back(vm.count("quiesce-hook") ?
+      vm["quiesce-hook"].as<std::string>() :
+      CMAKE_INSTALL_LIBEXECDIR "/rbd-nbd/rbd-nbd_quiesce");
   }
 
   translate_ceph_args(ceph_global_init_args, &args);
