@@ -1380,6 +1380,168 @@ const struct rbd_operations nbd_operations = {
 	krbd_flatten,
 	NULL,
 };
+
+int
+ublk_open(const char *name, struct rbd_ctx *ctx)
+{
+	int r;
+	int fd;
+	char dev[4096];
+	char *devnode;
+
+	SubProcess process("rbd", SubProcess::KEEP, SubProcess::PIPE,
+			   SubProcess::KEEP);
+	process.add_cmd_arg("device");
+	process.add_cmd_arg("map");
+	process.add_cmd_arg("-t");
+	process.add_cmd_arg("ublk");
+	std::string img;
+	img.append(pool);
+	img.append("/");
+	img.append(name);
+	process.add_cmd_arg(img.c_str());
+
+	r = __librbd_open(name, ctx);
+	if (r < 0)
+		return r;
+
+        r = process.spawn();
+        if (r < 0) {
+		prt("ublk_open failed to run rbd error: %s\n", process.err().c_str());
+		return r;
+        }
+	r = safe_read(process.get_stdout(), dev, sizeof(dev));
+	if (r < 0) {
+		prt("ublk_open failed to get ublk device path\n");
+		return r;
+	}
+	for (int i = 0; i < r; ++i)
+	  if (dev[i] == 10 || dev[i] == 13)
+	    dev[i] = 0;
+	dev[r] = 0;
+	r = process.join();
+	if (r) {
+		prt("rbd failed with error: %s", process.err().c_str());
+		return -EINVAL;
+	}
+
+	devnode = strdup(dev);
+	if (!devnode)
+		return -ENOMEM;
+
+	/*
+	 * unlike krbd/nbd, "rbd device map -t ublk" returns as soon as the
+	 * kernel assigns a dev_id -- /dev/ublkbN itself shows up slightly
+	 * later (created by udev, or by whatever no-udev workaround is in
+	 * place), so give it a chance to appear rather than failing on the
+	 * first ENOENT. Mirrors ggate_open()'s retry loop below.
+	 */
+	for (int i = 0; i < 100; i++) {
+		fd = open(devnode, O_RDWR | o_direct);
+		if (fd >= 0 || errno != ENOENT)
+			break;
+		usleep(100000);
+	}
+	if (fd < 0) {
+		r = -errno;
+		prt("open(%s) failed\n", devnode);
+		return r;
+	}
+
+	ctx->krbd_name = devnode;
+	ctx->krbd_fd = fd;
+
+	return 0;
+}
+
+int
+ublk_close(struct rbd_ctx *ctx)
+{
+	int r;
+
+	ceph_assert(ctx->krbd_name && ctx->krbd_fd >= 0);
+
+	if (close(ctx->krbd_fd) < 0) {
+		r = -errno;
+		prt("close(%s) failed\n", ctx->krbd_name);
+		return r;
+	}
+
+	SubProcess process("rbd");
+	process.add_cmd_arg("device");
+	process.add_cmd_arg("unmap");
+	process.add_cmd_arg("-t");
+	process.add_cmd_arg("ublk");
+	process.add_cmd_arg(ctx->krbd_name);
+
+        r = process.spawn();
+        if (r < 0) {
+		prt("ublk_close failed to run rbd error: %s\n", process.err().c_str());
+		return r;
+        }
+	r = process.join();
+	if (r) {
+		prt("rbd failed with error: %d", process.err().c_str());
+		return -EINVAL;
+	}
+
+	free((void *)ctx->krbd_name);
+
+	ctx->krbd_name = NULL;
+	ctx->krbd_fd = -1;
+
+	return __librbd_close(ctx);
+}
+
+/*
+ * Unlike krbd/nbd, ublk.rbd doesn't propagate a librbd-side resize to the
+ * kernel block device (no UBLK_F_UPDATE_SIZE support yet), so there is no
+ * point polling get_size() for the change to show up the way krbd_resize
+ * does -- it never will. ublk mode is therefore only meaningful in fsx
+ * lite mode (-L), which never calls resize with an actual size change
+ * (see check_trunc_hack()), so this just needs to keep the underlying
+ * image in sync without asserting anything about the device's size.
+ */
+int
+ublk_resize(struct rbd_ctx *ctx, uint64_t size)
+{
+	int ret;
+
+	ret = __krbd_flush(ctx, false);
+	if (ret < 0)
+		return ret;
+
+	return __librbd_resize(ctx, size);
+}
+
+int
+ublk_clone(struct rbd_ctx *ctx, const char *src_snapname,
+	   const char *dst_imagename, int *order, int stripe_unit,
+	   int stripe_count)
+{
+	int ret;
+
+	ret = __krbd_flush(ctx, false);
+	if (ret < 0)
+		return ret;
+
+	return __librbd_clone(ctx, src_snapname, dst_imagename, order,
+			      stripe_unit, stripe_count);
+}
+
+const struct rbd_operations ublk_operations = {
+	ublk_open,
+	ublk_close,
+	generic_pread,
+	generic_pwrite,
+	krbd_flush,
+	krbd_discard,
+	krbd_get_size,
+	ublk_resize,
+	ublk_clone,
+	krbd_flatten,
+	NULL,
+};
 #endif // __linux__
 
 #ifdef _WIN32
@@ -3215,6 +3377,13 @@ usage(void)
 #if defined(_WIN32)
 "	-M: enable rbd-wnbd mode (use -L, -r and -w too)\n"
 #endif
+#if defined(__linux__)
+"	-u: enable ublk mode (use -L, -h, -r and -w too, and a -l that's\n\
+	    a multiple of the sector size -- ublk.rbd's advertised device\n\
+	    capacity, like any block device's, truncates down to a whole\n\
+	    sector, and -L's upfront full-size write will otherwise fail\n\
+	    as a short write for the truncated remainder)\n"
+#endif
 "	-L: fsxLite - no file creations & no file size changes\n\
 	-N numops: total # operations to do (default infinity)\n\
 	-O: use oplen (see -o flag) for every op (default random)\n\
@@ -3338,7 +3507,7 @@ main(int argc, char **argv)
 	char goodfile[1024];
 	char logfile[1024];
 
-	const char* optstring = "b:c:dfgh:jkl:m:no:p:qr:s:t:w:xyCD:FGHKMLN:OP:RS:UWZ";
+	const char* optstring = "b:c:dfgh:jkl:m:no:p:qr:s:t:uw:xyCD:FGHKMLN:OP:RS:UWZ";
 	const struct option longopts[] = {
 		{"cluster", 1, NULL, LONG_OPT_CLUSTER},
 		{"id", 1, NULL, LONG_OPT_ID}};
@@ -3450,6 +3619,12 @@ main(int argc, char **argv)
 			if (truncbdy <= 0)
 				usage();
 			break;
+#if defined(__linux__)
+		case 'u':
+			prt("ublk mode enabled\n");
+			ops = &ublk_operations;
+			break;
+#endif
 		case 'w':
 			writebdy = getnum(optarg, &endp);
 			if (writebdy <= 0)
