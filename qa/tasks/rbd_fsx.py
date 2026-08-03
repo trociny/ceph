@@ -47,12 +47,13 @@ def _run_one_client(ctx, config, role):
     """Spawned task that runs the client"""
     krbd = config.get('krbd', False)
     nbd = config.get('nbd', False)
+    ublk = config.get('ublk', False)
     testdir = teuthology.get_testdir(ctx)
     (remote,) = ctx.cluster.only(role).remotes.keys()
 
     args = []
-    if krbd or nbd:
-        args.append('sudo') # rbd(-nbd) map/unmap need privileges
+    if krbd or nbd or ublk:
+        args.append('sudo') # rbd(-nbd)/rbd device map/unmap need privileges
     args.extend([
         'adjust-ulimits',
         'ceph-coverage',
@@ -75,6 +76,21 @@ def _run_one_client(ctx, config, role):
         msg = 'client role ({0}) must be a client'.format(role)
         raise ConfigError(msg)
 
+    size = config.get('size', 250000000)
+    if ublk:
+        # -u forces -L (lite mode, see below), whose upfront "zero the
+        # entire image" write submits the full size in one shot rather
+        # than building it up through a series of alignment-checked
+        # resize/write calls the way non-lite mode does -- so unlike
+        # krbd/nbd (which never hit this because they don't run lite
+        # mode), this size has to be sector-aligned itself, the same
+        # requirement -r/-w/-h/-t already carry for any real
+        # block-device backend. Round down rather than up: ublk.rbd
+        # (like any block device) can only expose a whole number of
+        # sectors, and rounding up would create a phantom tail sector
+        # librbd itself refuses to read or write.
+        size -= size % 512
+
     args.extend([
         'ceph_test_librbd_fsx',
         '--cluster', cluster_name,
@@ -87,7 +103,7 @@ def _run_one_client(ctx, config, role):
         '-w', str(config.get('writebdy',1)),
         '-t', str(config.get('truncbdy',1)),
         '-h', str(config.get('holebdy',1)),
-        '-l', str(config.get('size', 250000000)),
+        '-l', str(size),
         '-S', str(config.get('seed', 0)),
         '-N', str(config.get('ops', 1000)),
     ])
@@ -95,6 +111,12 @@ def _run_one_client(ctx, config, role):
         args.append('-K') # -K enables krbd mode
     if nbd:
         args.append('-M') # -M enables nbd mode
+    if ublk:
+        args.append('-u') # -u enables ublk mode
+        # ublk.rbd doesn't propagate librbd-side resizes to the kernel
+        # block device yet, so -L (lite mode, no file size changes) is
+        # required -- see the -u usage text in fsx.cc.
+        args.append('-L')
     if config.get('direct_io', False):
         args.append('-Z') # -Z use direct IO
     if not config.get('randomized_striping', True):
