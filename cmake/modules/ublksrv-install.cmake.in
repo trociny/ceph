@@ -1,0 +1,36 @@
+# Generated from ublksrv-install.cmake.in by BuildUblksrv.cmake's
+# build_ublksrv(). Runs at real install time (ninja install / rpm
+# %install / dh_auto_install), not at build time -- see the comment in
+# BuildUblksrv.cmake for why that distinction matters here.
+
+execute_process(
+  COMMAND @MAKE_EXECUTABLE@ install-sbinPROGRAMS "sbin_PROGRAMS=ublk ublk.rbd" "DESTDIR=$ENV{DESTDIR}"
+  WORKING_DIRECTORY "@ublksrv_source_dir@"
+  RESULT_VARIABLE ublksrv_bin_install_rc)
+if(NOT ublksrv_bin_install_rc EQUAL 0)
+  message(FATAL_ERROR "ublksrv: failed to install ublk/ublk.rbd")
+endif()
+
+execute_process(
+  COMMAND @MAKE_EXECUTABLE@ install-libLTLIBRARIES "DESTDIR=$ENV{DESTDIR}"
+  WORKING_DIRECTORY "@ublksrv_source_dir@/lib"
+  RESULT_VARIABLE ublksrv_lib_install_rc)
+if(NOT ublksrv_lib_install_rc EQUAL 0)
+  message(FATAL_ERROR "ublksrv: failed to install libublksrv")
+endif()
+
+# install-libLTLIBRARIES also installs the static libublksrv.a and its
+# libtool .la file alongside the .so -- neither is needed (nothing
+# outside ublksrv itself links against libublksrv), so drop them rather
+# than ship them. This isn't just cleanliness: rpm's brp-remove-la-files
+# buildroot policy script (present in newer redhat-rpm-config, e.g. on
+# Rocky/RHEL 10 but not yet on el9) strips .la files from the buildroot
+# right after %install, before %files is checked against it -- so a
+# %files line for libublksrv.la fails there with "File not found" even
+# though this script did install it successfully. Simplest fix is to
+# not install it in the first place, rather than depend on a %files
+# entry surviving a buildroot policy step that varies by distro/rpm
+# version.
+file(REMOVE
+  "$ENV{DESTDIR}@CMAKE_INSTALL_FULL_LIBDIR@/libublksrv.a"
+  "$ENV{DESTDIR}@CMAKE_INSTALL_FULL_LIBDIR@/libublksrv.la")

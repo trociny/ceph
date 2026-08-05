@@ -341,6 +341,14 @@ if(WITH_RBD_UBBD)
   build_ubbd()
 endif()
 
+# Temporary vendoring of ublksrv (src/ublksrv submodule) so shaman-built
+# packages carry ublk support for teuthology testing, until ublksrv ships
+# proper releases/packaging of its own. Actually built from
+# src/CMakeLists.txt (see build_ublksrv() there), once librbd/librados
+# exist for it to link against -- this only declares the toggle.
+CMAKE_DEPENDENT_OPTION(WITH_RBD_UBLK "Enable ublk support for rbd device utility" ON
+    "WITH_RBD;LINUX" OFF)
+
 CMAKE_DEPENDENT_OPTION(WITH_SPDK "Enable SPDK" OFF
   "CMAKE_SYSTEM_PROCESSOR MATCHES i386|i686|amd64|x86_64|AMD64|aarch64|riscv64" OFF)
 option(WITH_SYSTEM_SPDK "Require a system SPDK instead of building bundled src/spdk" OFF)

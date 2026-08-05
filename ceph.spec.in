@@ -1144,6 +1144,20 @@ Requires:	librbd1 = %{_epoch_prefix}%{version}-%{release}
 %description -n rbd-nbd
 NBD based client to map Ceph rbd images to local device
 
+%package -n ublksrv
+Summary:	Ceph RBD client based on ublk
+%if 0%{?suse_version}
+Group:		System/Filesystems
+%endif
+Requires:	librados2 = %{_epoch_prefix}%{version}-%{release}
+Requires:	librbd1 = %{_epoch_prefix}%{version}-%{release}
+%description -n ublksrv
+ublk based client to map Ceph rbd images to a local device.
+
+This is a temporary vendored build of the ublksrv project (not yet
+packaged/released upstream), bundled with ceph solely to support
+testing the ublk rbd device type.
+
 %package radosgw
 Summary:	Rados REST gateway
 %if 0%{?suse_version}
@@ -2635,6 +2649,11 @@ fi
 %dir %{_libexecdir}/rbd-nbd
 %{_libexecdir}/rbd-nbd/rbd-nbd_quiesce
 
+%files -n ublksrv
+%{_sbindir}/ublk
+%{_sbindir}/ublk.rbd
+%{_libdir}/libublksrv.so*
+
 %files radosgw
 %{_bindir}/radosgw
 %{_bindir}/radosgw-token
@@ -2899,6 +2918,10 @@ fi
 %post -n librbd1 -p /sbin/ldconfig
 
 %postun -n librbd1 -p /sbin/ldconfig
+
+%post -n ublksrv -p /sbin/ldconfig
+
+%postun -n ublksrv -p /sbin/ldconfig
 
 %files -n librbd-devel
 %dir %{_includedir}/rbd
