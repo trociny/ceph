@@ -88,3 +88,7 @@
 [submodule "src/librdkafka"]
 	path = src/librdkafka
 	url = https://github.com/confluentinc/librdkafka.git
+[submodule "src/ublksrv"]
+	path = src/ublksrv
+	url = https://github.com/clyso/ublksrv.git
+	branch = wip-ublk-rbd
