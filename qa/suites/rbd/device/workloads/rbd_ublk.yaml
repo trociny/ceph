@@ -1,0 +1,54 @@
+# ublk_drv was only merged in Linux 6.0, so it categorically doesn't
+# exist on distros whose stock/distro kernel predates that -- jammy's
+# 5.15 and centos9/rhel9's 5.14 both fail "modprobe ublk_drv" outright,
+# no ceph/ublksrv-side fix possible. Restrict this workload to distros
+# new enough to actually have the module, rather than let teuthology
+# randomly schedule it onto ones that can never pass.
+teuthology:
+  postmerge:
+    - |
+      if yaml.os_type == "ubuntu" and yaml.os_version == "22.04" then reject() end
+      if yaml.os_type == "centos" then reject() end
+
+# ublksrv (providing "ublk"/"ublk.rbd") is temporarily vendored and built
+# by ceph itself (see WITH_RBD_UBLK), packaged as "ublksrv" -- pull it in
+# the same way rbd_nbd.yaml pulls in rbd-nbd.
+#
+# rbd-nbd is *also* needed here: when --quiesce is given without an
+# explicit --quiesce-hook, "rbd device map -t ublk" falls back to the
+# same default hook script rbd-nbd uses (see execute_map() in Ublk.cc),
+# but that script (rbd-nbd_quiesce) is packaged exclusively under the
+# rbd-nbd package/subpackage, not ublksrv. Without it, every quiesce
+# test relying on the default hook fails outright: fork+exec of the
+# nonexistent hook returns ENOENT, rbd_run_quiesce_hook() unconditionally
+# maps that to -EIO, indistinguishable from a real notify-transport
+# failure in the logs -- confirmed via journalctl showing
+# "rbd_run_quiesce_hook: /usr/libexec/rbd-nbd/rbd-nbd_quiesce ...
+# quiesce failed (status 32512)" i.e. exit 127, exec failure, on a
+# job where "rbd-nbd" was never installed.
+overrides:
+  install:
+    ceph:
+      extra_packages: [ublksrv, rbd-nbd]
+tasks:
+# unlike krbd (whose kernel module is auto-loaded by libkrbd's own
+# krbd_map()), "ublk" deliberately does *not* auto-modprobe -- it just
+# checks and fails with "please run modprobe ublk_drv first" -- so that
+# has to happen here instead.
+#
+# Rocky 10's kernel has ublk_drv, but Red Hat/Rocky ship with the
+# kernel.io_uring_disabled sysctl set (a hardening default carried over
+# from RHEL 9, where io_uring was disabled outright over its CVE
+# history) -- ublksrv's control-plane io_uring_queue_init_params() then
+# fails with EPERM ("queue_init: Operation not permitted"), before
+# ublk_drv itself is ever involved. Force it back on; harmless no-op
+# (the sysctl file doesn't exist, so this fails and is swallowed) on
+# every other distro, which never restricts it in the first place.
+- pexec:
+    clients:
+      - sudo modprobe ublk_drv
+      - sudo sysctl -w kernel.io_uring_disabled=0 2>/dev/null || true
+- workunit:
+    clients:
+      client.0:
+        - rbd/rbd-ublk.sh
