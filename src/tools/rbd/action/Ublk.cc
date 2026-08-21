@@ -21,12 +21,32 @@
 #include <unistd.h>
 
 /*
- * This is a thin wrapper around ublksrv's "ublk" control binary: all of the
- * actual librbd/librados I/O logic lives in ublk.rbd (in the ublksrv
- * project, an external runtime dependency -- same relationship "rbd device
- * map -t nbd" has with the nbd kernel module), not here. This code only
- * translates "rbd device {list,map,unmap}" into "ublk {list,add,del}"
+ * This is a thin wrapper around a ublk control binary: all of the actual
+ * librbd/librados I/O logic lives in the target process it execs (an
+ * external runtime dependency -- same relationship "rbd device map -t nbd"
+ * has with the nbd kernel module), not here. This code only translates
+ * "rbd device {list,map,unmap}" into that binary's own {list,add,del}
  * invocations.
+ *
+ * Two independent implementations of that binary exist and are both
+ * supported here: ublksrv's C++ "ublk"/"ublk.rbd" (the default), and
+ * rublk's Rust "rublk" (opt in via RBD_UBLK=rublk in the environment --
+ * see use_rublk() below). They're close enough in spirit -- both take
+ * "add"/"del"/"list"/"recover" and print a broadly similar per-device dump
+ * -- that most of this file's argument-building and output-parsing logic
+ * is shared, but they differ in enough small, concrete ways that a few
+ * spots have to branch explicitly on which one is in use:
+ *  - "ublk add -t rbd ... -r 1" enables user-recovery via a "-r" flag that
+ *    takes a value; rublk's "-r" is a bare boolean (clap) flag, and the
+ *    target name is a subcommand ("rublk add rbd ...") rather than a "-t"
+ *    argument to a generic "add".
+ *  - "ublk list" writes pool/image/etc directly as fields of the "target"
+ *    JSON blob, with an empty string/0 standing in for "unset"; rublk's
+ *    generic libublk-rs architecture instead splits that into a "target"
+ *    blob holding only generic fields (dev_size/name/type) and a separate
+ *    "target_data" blob keyed by target name (here, "rbd") holding the
+ *    per-target fields, representing "unset" as a real JSON null rather
+ *    than an empty string/0.
  */
 
 namespace rbd {
@@ -50,26 +70,90 @@ struct MappedDevice {
   uint64_t snap_id = CEPH_NOSNAP;
 };
 
-// mirrors the fields ublk.rbd's init_tgt stashes via ublk_json_write_tgt_*
 struct UblkTarget {
-  std::string name;
   std::string pool;
   std::string nspace;
   std::string image;
   std::string snap;
   uint64_t snap_id = 0;
   bool has_snap_id = false;
-
-  void decode_json(JSONObj *obj) {
-    JSONDecoder::decode_json("name", name, obj);
-    JSONDecoder::decode_json("pool", pool, obj);
-    JSONDecoder::decode_json("namespace", nspace, obj);
-    JSONDecoder::decode_json("image", image, obj);
-    JSONDecoder::decode_json("snap", snap, obj);
-    JSONDecoder::decode_json("snap_id", snap_id, obj);
-    JSONDecoder::decode_json("has_snap_id", has_snap_id, obj);
-  }
 };
+
+/* RBD_UBLK selects which of the two "ublk"-shaped binaries this file
+ * drives: unset/anything else means ublksrv's C++ "ublk" (the default,
+ * matching how this integration originally shipped); "rublk" opts into
+ * the newer Rust implementation instead. This is a *mode* switch, not a
+ * path -- the binary is still looked up via PATH by SubProcess, same as
+ * "ublk" always has been, so an operator wanting a non-default install
+ * location handles that the same way as any other PATH-resolved tool
+ * (adjusting PATH itself), not through this variable.
+ */
+bool use_rublk() {
+  const char *v = getenv("RBD_UBLK");
+  return v && std::string(v) == "rublk";
+}
+
+std::string ublk_cmd_name() {
+  return use_rublk() ? "rublk" : "ublk";
+}
+
+// mirrors the fields ublk.rbd's init_tgt stashes via ublk_json_write_tgt_*:
+// pool/image/etc are fields directly on the "target" JSON blob, alongside
+// a "name" identifying the target type; "" and 0/false stand in for
+// "unset" namespace/snap/snap_id.
+bool decode_ublksrv_target(JSONObj *obj, UblkTarget *t) {
+  std::string name;
+  JSONDecoder::decode_json("name", name, obj);
+  if (name != "rbd") {
+    return false;
+  }
+  JSONDecoder::decode_json("pool", t->pool, obj);
+  JSONDecoder::decode_json("namespace", t->nspace, obj);
+  JSONDecoder::decode_json("image", t->image, obj);
+  JSONDecoder::decode_json("snap", t->snap, obj);
+  JSONDecoder::decode_json("snap_id", t->snap_id, obj);
+  JSONDecoder::decode_json("has_snap_id", t->has_snap_id, obj);
+  return true;
+}
+
+/* rublk's generic libublk-rs architecture keeps only dev_size/name/type on
+ * the "target" blob; per-target fields live in a separate "target_data"
+ * blob keyed by target name -- {"rbd": {"pool": ..., "image": ..., ...}}
+ * -- rather than inline on "target" itself, and "unset" is a real JSON
+ * null rather than an empty string/0. A null decodes, via the plain
+ * string/uint64_t JSONDecoder paths, to the literal 4-character text
+ * "null" (see JSONObj::init() in ceph_json.cc: non-string JSON values are
+ * round-tripped back to their JSON text, and json_spirit renders null as
+ * that text) rather than throwing -- so each field is checked against
+ * that sentinel explicitly below instead of trusting decode_json's own
+ * success/failure the way decode_ublksrv_target() above safely can for
+ * ublksrv's own (never-null) encoding.
+ */
+bool decode_rublk_target(JSONObj *target_data_obj, UblkTarget *t) {
+  JSONObj *rbd_obj = target_data_obj->find_obj("rbd");
+  if (!rbd_obj) {
+    return false;
+  }
+
+  JSONDecoder::decode_json("pool", t->pool, rbd_obj);
+  JSONDecoder::decode_json("namespace", t->nspace, rbd_obj);
+  JSONDecoder::decode_json("image", t->image, rbd_obj);
+  JSONDecoder::decode_json("snap", t->snap, rbd_obj);
+  if (t->nspace == "null") {
+    t->nspace.clear();
+  }
+  if (t->snap == "null") {
+    t->snap.clear();
+  }
+
+  std::string snap_id_str;
+  JSONDecoder::decode_json("snap_id", snap_id_str, rbd_obj);
+  t->has_snap_id = !snap_id_str.empty() && snap_id_str != "null";
+  t->snap_id = t->has_snap_id ? strtoull(snap_id_str.c_str(), NULL, 10) : 0;
+
+  return !t->pool.empty() && t->pool != "null" &&
+         !t->image.empty() && t->image != "null";
+}
 
 /* ublk.rbd's own option parser only understands --conf/--id/--cluster (not
  * the full ceph_argparse vocabulary), so translate the subset of global
@@ -109,7 +193,8 @@ void translate_ceph_args(const std::vector<std::string> &ceph_global_init_args,
 int call_ublk_cmd(const std::vector<std::string> &args,
                   SubProcess::std_fd_op stdout_op,
                   std::string *output) {
-  SubProcess process("ublk", SubProcess::CLOSE, stdout_op, SubProcess::KEEP);
+  std::string cmd = ublk_cmd_name();
+  SubProcess process(cmd.c_str(), SubProcess::CLOSE, stdout_op, SubProcess::KEEP);
 
   for (auto &arg : args) {
     process.add_cmd_arg(arg.c_str());
@@ -117,7 +202,8 @@ int call_ublk_cmd(const std::vector<std::string> &args,
 
   int r = process.spawn();
   if (r < 0) {
-    std::cerr << "rbd: failed to run ublk: " << process.err() << std::endl;
+    std::cerr << "rbd: failed to run " << cmd << ": " << process.err()
+              << std::endl;
     return r;
   }
 
@@ -131,22 +217,32 @@ int call_ublk_cmd(const std::vector<std::string> &args,
 
   r = process.join();
   if (r != 0) {
-    std::cerr << "rbd: ublk failed with error: " << process.err() << std::endl;
+    std::cerr << "rbd: " << cmd << " failed with error: " << process.err()
+              << std::endl;
     return -EINVAL;
   }
   return 0;
 }
 
 /*
- * "ublk list" prints one block per device, e.g.:
+ * "ublk list"/"rublk list" both print one block per device, e.g. (ublk):
  *
  *   dev id 1: nr_hw_queues 1 queue_depth 128 block size 512 dev_capacity ...
  *           ...
  *           target {"cluster":"","pool":"rbd","image":"foo",...,"name":"rbd"}
  *
- * The "target" line only appears for devices whose target actually wrote
- * something via ublk_json_write_tgt_*, which is exactly the JSON blob
- * ublk.rbd's init_tgt stashes.
+ * or (rublk):
+ *
+ *   dev id 1: nr_hw_queues 1 queue_depth 128 block size 512 dev_capacity ...
+ *           max rq size ... daemon pid ... flags ... state LIVE
+ *           ...
+ *           target {"dev_size":...,"name":"rbd","type":0}
+ *           target_data {"rbd":{"pool":"rbd","image":"foo",...}}
+ *
+ * The "target"/"target_data" lines only appear for devices whose target
+ * actually wrote something via the respective JSON-persistence mechanism,
+ * which is exactly the blob each rbd target's own init stashes -- see
+ * decode_ublksrv_target()/decode_rublk_target() above for the two shapes.
  */
 int list_ublk_rbd_devices(std::vector<MappedDevice> *devices) {
   std::string output;
@@ -163,31 +259,44 @@ int list_ublk_rbd_devices(std::vector<MappedDevice> *devices) {
   }
 
   static const std::regex target_re("target (\\{.*\\})");
-  static const std::regex pid_re("daemon pid (-?[0-9]+) state (\\w+)");
+  static const std::regex target_data_re("target_data (\\{.*\\})");
+  // rublk's line additionally carries a "flags 0x.." token between the pid
+  // and the state that ublk's own equivalent line doesn't; ".*" tolerates
+  // it either way (regex "." doesn't cross the newline into another line).
+  static const std::regex pid_re("daemon pid (-?[0-9]+).*state (\\w+)");
+  bool rublk = use_rublk();
   for (size_t idx = 0; idx < starts.size(); idx++) {
     size_t block_start = starts[idx].second;
     size_t block_end = (idx + 1 < starts.size()) ? starts[idx + 1].second :
       output.size();
     std::string block = output.substr(block_start, block_end - block_start);
 
-    std::smatch tm;
-    if (!std::regex_search(block, tm, target_re)) {
-      continue;
-    }
-
-    std::string target_json = tm[1].str();
-    JSONParser p;
-    if (!p.parse(target_json.c_str(), target_json.length())) {
-      continue;
-    }
-
     UblkTarget t;
+    bool matched;
     try {
-      decode_json_obj(t, &p);
+      if (rublk) {
+        std::smatch tm;
+        if (!std::regex_search(block, tm, target_data_re)) {
+          continue;
+        }
+        std::string json_str = tm[1].str();
+        JSONParser p;
+        matched = p.parse(json_str.c_str(), json_str.length()) &&
+                  decode_rublk_target(&p, &t);
+      } else {
+        std::smatch tm;
+        if (!std::regex_search(block, tm, target_re)) {
+          continue;
+        }
+        std::string json_str = tm[1].str();
+        JSONParser p;
+        matched = p.parse(json_str.c_str(), json_str.length()) &&
+                  decode_ublksrv_target(&p, &t);
+      }
     } catch (const JSONDecoder::err&) {
       continue;
     }
-    if (t.name != "rbd") {
+    if (!matched) {
       continue;
     }
 
@@ -196,10 +305,11 @@ int list_ublk_rbd_devices(std::vector<MappedDevice> *devices) {
     // the target JSON can outlive a daemon that was killed rather than
     // cleanly unmapped (e.g. SIGKILL) -- skip those (DEAD, or FAIL_IO
     // without a cooperating daemon), but keep QUIESCED ones: that's the
-    // state a device added with "-r 1" (user recovery) lands in when its
-    // daemon dies unexpectedly, and it's recoverable via "ublk recover"
-    // (see execute_recover()), so it should stay visible for users to spot
-    // and recover by id rather than being silently dropped from the list.
+    // state a device added with user-recovery enabled ("-r 1" for ublk,
+    // "-r" for rublk) lands in when its daemon dies unexpectedly, and it's
+    // recoverable via "rbd device recover" (see execute_recover()), so it
+    // should stay visible for users to spot and recover by id rather than
+    // being silently dropped from the list.
     std::smatch pm;
     if (!std::regex_search(block, pm, pid_re) ||
         (pm[2] != "LIVE" && pm[2] != "QUIESCED")) {
@@ -346,12 +456,23 @@ int execute_map(const po::variables_map &vm,
   }
   utils::normalize_pool_name(&pool_name);
 
-  // enable ublk's user-recovery feature so a dead daemon's device can be
-  // reattached via "rbd device recover" instead of having to be re-mapped.
-  std::vector<std::string> args = {"add", "-t", "rbd",
-                                   "--pool", pool_name,
-                                   "--image", image_name,
-                                   "-r", "1"};
+  // enable user-recovery so a dead daemon's device can be reattached via
+  // "rbd device recover" instead of having to be re-mapped. "-t rbd"/"-r 1"
+  // (ublk) vs the "rbd" subcommand/bare "-r" (rublk) is the one place the
+  // two CLIs actually diverge in shape rather than just naming: ublk's
+  // target type is a "-t" argument to a generic "add" and its "-r" takes a
+  // 0/1 value, while rublk's target type is itself the subcommand and its
+  // "-r"/"--user-recovery" is a bare boolean (clap) flag that a stray "1"
+  // argument after it would trip over as unexpected.
+  std::vector<std::string> args = use_rublk() ?
+    std::vector<std::string>{"add", "rbd",
+                             "--pool", pool_name,
+                             "--image", image_name,
+                             "-r"} :
+    std::vector<std::string>{"add", "-t", "rbd",
+                             "--pool", pool_name,
+                             "--image", image_name,
+                             "-r", "1"};
   if (!nspace_name.empty()) {
     args.push_back("--namespace");
     args.push_back(nspace_name);
