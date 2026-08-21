@@ -92,3 +92,7 @@
 	path = src/ublksrv
 	url = https://github.com/clyso/ublksrv.git
 	branch = wip-ublk-rbd
+[submodule "src/rublk"]
+	path = src/rublk
+	url = https://github.com/clyso/rublk.git
+	branch = wip-ublk-rbd
