@@ -1112,6 +1112,22 @@ Description: ublk-based rbd client for the Ceph distributed file system
  packaged/released upstream), bundled with ceph solely to support
  testing the ublk rbd device type.
 
+Package: rublk
+Architecture: linux-any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+Description: ublk-based rbd client for the Ceph distributed file system (Rust)
+ Ceph is a massively scalable, open-source, distributed
+ storage system that runs on commodity hardware and delivers object,
+ block and file system storage.  This is a
+ ublk-based client that allows one to map Ceph rbd images as local
+ block device, functionally equivalent to the ublksrv package's
+ ublk/ublk.rbd but implemented in Rust.
+ .
+ This is a temporary vendored build of the rublk project (not yet
+ packaged/released upstream), bundled with ceph solely to support
+ testing the ublk rbd device type.
+
 Package: ceph-common
 Architecture: linux-any
 Depends: adduser (>= 3.11),

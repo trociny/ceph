@@ -349,6 +349,14 @@ endif()
 CMAKE_DEPENDENT_OPTION(WITH_RBD_UBLK "Enable ublk support for rbd device utility" ON
     "WITH_RBD;LINUX" OFF)
 
+# Temporary vendoring of rublk (src/rublk submodule), the Rust alternative
+# to ublksrv's "ublk"/"ublk.rbd" -- see the comment above WITH_RBD_UBLK.
+# Actually built from src/CMakeLists.txt (see build_rublk() there), once
+# librbd/librados exist for it to link against -- this only declares the
+# toggle.
+CMAKE_DEPENDENT_OPTION(WITH_RBD_RUBLK "Enable rublk support for rbd device utility" ON
+    "WITH_RBD;LINUX" OFF)
+
 CMAKE_DEPENDENT_OPTION(WITH_SPDK "Enable SPDK" OFF
   "CMAKE_SYSTEM_PROCESSOR MATCHES i386|i686|amd64|x86_64|AMD64|aarch64|riscv64" OFF)
 option(WITH_SYSTEM_SPDK "Require a system SPDK instead of building bundled src/spdk" OFF)
