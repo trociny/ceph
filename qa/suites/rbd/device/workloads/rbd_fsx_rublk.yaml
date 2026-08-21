@@ -1,0 +1,37 @@
+# ublk_drv was only merged in Linux 6.0, so it categorically doesn't
+# exist on distros whose stock/distro kernel predates that -- jammy's
+# 5.15 and centos9/rhel9's 5.14 both fail "modprobe ublk_drv" outright,
+# no ceph/rublk-side fix possible. Restrict this workload to distros
+# new enough to actually have the module, rather than let teuthology
+# randomly schedule it onto ones that can never pass.
+teuthology:
+  postmerge:
+    - |
+      if yaml.os_type == "ubuntu" and yaml.os_version == "22.04" then reject() end
+      if yaml.os_type == "centos" then reject() end
+
+# rublk (a Rust alternative to ublksrv's "ublk"/"ublk.rbd") is
+# temporarily vendored and built by ceph itself (see WITH_RBD_RUBLK),
+# packaged as "rublk" -- pull it in the same way rbd_fsx_ublk.yaml pulls
+# in ublksrv.
+overrides:
+  install:
+    ceph:
+      extra_packages: [rublk]
+tasks:
+# unlike krbd (whose kernel module is auto-loaded by libkrbd's own
+# krbd_map()), "rbd device map -t ublk" deliberately does *not*
+# auto-modprobe -- so that has to happen here instead. See
+# rbd_fsx_ublk.yaml for why the io_uring_disabled sysctl also needs
+# forcing back on.
+- pexec:
+    clients:
+      - sudo modprobe ublk_drv
+      - sudo sysctl -w kernel.io_uring_disabled=0 2>/dev/null || true
+- rbd_fsx:
+    clients: [client.0]
+    ops: 6000
+    rublk: True
+    holebdy: 512
+    readbdy: 512
+    writebdy: 512

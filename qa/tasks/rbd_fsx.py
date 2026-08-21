@@ -36,6 +36,7 @@ def task(ctx, config):
           ops: <number of operations to do>
           size: <maximum image size in bytes>
           valgrind: [--tool=<valgrind tool>]
+      rublk: <use rublk instead of ublksrv as the ublk backend>
     """
     log.info('starting rbd_fsx...')
     with parallel() as p:
@@ -48,11 +49,17 @@ def _run_one_client(ctx, config, role):
     krbd = config.get('krbd', False)
     nbd = config.get('nbd', False)
     ublk = config.get('ublk', False)
+    # RBD_UBLK=rublk selects rublk (see Ublk.cc's use_rublk()) as the
+    # ublk backend "rbd device map -t ublk" shells out to instead of
+    # ublksrv's "ublk"/"ublk.rbd" -- fsx.cc's ublk-mode handling itself
+    # is backend-agnostic (it just runs "rbd device map -t ublk"), so
+    # this needs no args of its own beyond -u/-L, only the env var.
+    rublk = config.get('rublk', False)
     testdir = teuthology.get_testdir(ctx)
     (remote,) = ctx.cluster.only(role).remotes.keys()
 
     args = []
-    if krbd or nbd or ublk:
+    if krbd or nbd or ublk or rublk:
         args.append('sudo') # rbd(-nbd)/rbd device map/unmap need privileges
     args.extend([
         'adjust-ulimits',
@@ -77,7 +84,7 @@ def _run_one_client(ctx, config, role):
         raise ConfigError(msg)
 
     size = config.get('size', 250000000)
-    if ublk:
+    if ublk or rublk:
         # -u forces -L (lite mode, see below), whose upfront "zero the
         # entire image" write submits the full size in one shot rather
         # than building it up through a series of alignment-checked
@@ -111,7 +118,7 @@ def _run_one_client(ctx, config, role):
         args.append('-K') # -K enables krbd mode
     if nbd:
         args.append('-M') # -M enables nbd mode
-    if ublk:
+    if ublk or rublk:
         args.append('-u') # -u enables ublk mode
         # ublk.rbd doesn't propagate librbd-side resizes to the kernel
         # block device yet, so -L (lite mode, no file size changes) is
@@ -134,4 +141,5 @@ def _run_one_client(ctx, config, role):
         'image_{image}'.format(image=role),
     ])
 
-    remote.run(args=args)
+    env = {'RBD_UBLK': 'rublk'} if rublk else None
+    remote.run(args=args, env=env)
