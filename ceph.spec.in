@@ -445,8 +445,11 @@ BuildRequires:  ninja-build
 BuildRequires:  CUnit-devel
 BuildRequires:	python3-devel
 # needed by WITH_RBD_RUBLK's build_rublk() (cmake/modules/BuildRublk.cmake)
-# to build the vendored src/rublk submodule via cargo
+# to build the vendored src/rublk submodule via cargo. clang-devel provides
+# libclang.so, which the libublk-rs-sys crate's build.rs needs at build time
+# (via bindgen) to generate FFI bindings from the kernel's ublk uapi header.
 BuildRequires:  cargo
+BuildRequires:  clang-devel
 %endif
 %if 0%{?openruyi}
 BuildRequires:	ninja
