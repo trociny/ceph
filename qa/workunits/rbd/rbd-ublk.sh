@@ -385,8 +385,12 @@ echo \$1 > ${TEMPDIR}/\$2
 EOF
 rbd snap create ${POOL}/${IMAGE}@quiesce1
 _sudo dd if=${DATA} of=${DEV} bs=1M count=1 oflag=direct
-test "$(cat ${TEMPDIR}/quiesce)" = ${DEV}
-test "$(cat ${TEMPDIR}/unquiesce)" = ${DEV}
+# the hook runs as whatever user the ublk daemon itself is running as
+# (root, via the _sudo map above), so the files it just wrote may not be
+# world-readable -- read them back with the same privilege rather than
+# relying on any particular daemon umask policy.
+test "$(_sudo cat ${TEMPDIR}/quiesce)" = ${DEV}
+test "$(_sudo cat ${TEMPDIR}/unquiesce)" = ${DEV}
 
 # test snap create fails if the hook fails
 cat > ${QUIESCE_HOOK} <<EOF
