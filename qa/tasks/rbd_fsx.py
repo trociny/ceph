@@ -61,6 +61,11 @@ def _run_one_client(ctx, config, role):
     args = []
     if krbd or nbd or ublk or rublk:
         args.append('sudo') # rbd(-nbd)/rbd device map/unmap need privileges
+    if rublk:
+        # sudo resets the environment by default, so this has to come
+        # after it (setting the var for whatever sudo execs), not before
+        # (which would just set it for sudo's own, discarded, environment)
+        args.extend(['env', 'RBD_UBLK=rublk'])
     args.extend([
         'adjust-ulimits',
         'ceph-coverage',
@@ -141,5 +146,4 @@ def _run_one_client(ctx, config, role):
         'image_{image}'.format(image=role),
     ])
 
-    env = {'RBD_UBLK': 'rublk'} if rublk else None
-    remote.run(args=args, env=env)
+    remote.run(args=args)
