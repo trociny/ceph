@@ -183,6 +183,15 @@ DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}`
 get_pid ${POOL}
 _sudo rbd device --device-type ublk list | grep "${IMAGE}"
 
+# flush test
+# the block layer only issues real flush requests down to the target if
+# it believes there's a volatile write cache to flush (advertised via
+# UBLK_ATTR_VOLATILE_CACHE, which becomes BLK_FEAT_WRITE_CACHE) --
+# without it, an fsync/journal commit is satisfied locally by the kernel
+# and the target's own flush call is never made at all, so librbd's own
+# writeback cache could go unflushed indefinitely on a crash.
+[ "`cat /sys/block/$(basename ${DEV})/queue/write_cache`" = "write back" ]
+
 # read test
 [ "`dd if=${DATA} bs=1M | md5sum`" = "`_sudo dd if=${DEV} bs=1M | md5sum`" ]
 
@@ -226,6 +235,25 @@ provisioned=`rbd -p ${POOL} --format xml du ${IMAGE} |
 used=`rbd -p ${POOL} --format xml du ${IMAGE} |
   xmlstarlet sel -t -m "//stats/images/image/used_size" -v .`
 [ "${used}" -lt "${provisioned}" ]
+unmap_device ${DEV} ${PID}
+
+# write-zeroes test
+# a sub-granularity WRITE_ZEROES (blkdiscard -z) must actually zero the
+# requested range: unlike a hint-only DISCARD, librbd's own
+# discard-pruning behavior (rounding a range inward to
+# rbd_discard_granularity_bytes and dropping whatever doesn't fit) would
+# silently leave stale data in place here if WRITE_ZEROES were wired to
+# the same discard call DISCARD uses -- the kernel completes the request
+# either way, so this doesn't surface as an I/O error, only as wrong data
+# on a later read.
+DEV=`_sudo rbd device --device-type ublk map ${POOL}/${IMAGE}`
+get_pid ${POOL}
+dd if=/dev/urandom of=${TEMPDIR}/wz_expected bs=4096 count=4
+_sudo dd if=${TEMPDIR}/wz_expected of=${DEV} bs=4096 count=4 oflag=direct
+_sudo blkdiscard -z -o 4096 -l 8192 ${DEV}
+dd if=/dev/zero of=${TEMPDIR}/wz_expected bs=4096 seek=1 count=2 conv=notrunc
+_sudo dd if=${DEV} of=${TEMPDIR}/wz_actual bs=4096 count=4 iflag=direct
+cmp ${TEMPDIR}/wz_expected ${TEMPDIR}/wz_actual
 unmap_device ${DEV} ${PID}
 
 # read-only option test
